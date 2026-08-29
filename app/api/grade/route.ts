@@ -88,24 +88,32 @@ Instructions:
 3. Write a short explanation (1-2 sentences) of the grade in the feedback property.
 Output response matching the JSON schema.`;
 
-      const result = await model.generateContent(prompt);
-      const textResponse = result.response.text();
-      const parsed = JSON.parse(textResponse);
+      try {
+        const result = await model.generateContent(prompt);
+        const textResponse = result.response.text();
+        const parsed = JSON.parse(textResponse);
 
-      // Capping score to maxMarks and floor to 0
-      let finalScore = Number(parsed.score);
-      if (isNaN(finalScore)) finalScore = 0;
-      finalScore = Math.max(0, Math.min(maxMarks, finalScore));
+        // Capping score to maxMarks and floor to 0
+        let finalScore = Number(parsed.score);
+        if (isNaN(finalScore)) finalScore = 0;
+        finalScore = Math.max(0, Math.min(maxMarks, finalScore));
+        finalScore = Math.round(finalScore * 10) / 10;
 
-      // Round to 1 decimal place if decimal
-      finalScore = Math.round(finalScore * 10) / 10;
-
-      return {
-        questionId: question.id,
-        score: finalScore,
-        maxMarks,
-        feedback: parsed.feedback || "Answer evaluated.",
-      } as GradedResult;
+        return {
+          questionId: question.id,
+          score: finalScore,
+          maxMarks,
+          feedback: parsed.feedback || "Answer evaluated.",
+        } as GradedResult;
+      } catch (err) {
+        console.error(`Error grading question ${question.id}:`, err);
+        return {
+          questionId: question.id,
+          score: 0,
+          maxMarks,
+          feedback: `AI grading encountered an issue: ${err instanceof Error ? err.message : "safety block or parse failure"}.`,
+        } as GradedResult;
+      }
     });
 
     const gradedResults = await Promise.all(gradingPromises);
