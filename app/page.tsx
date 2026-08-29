@@ -4,7 +4,7 @@ import React, { useState } from "react";
 import Sidebar from "@/components/Sidebar";
 import Topbar from "@/components/Topbar";
 import { useVeda } from "@/lib/context";
-import { convertPdfToImages } from "@/lib/pdfHelper";
+import { convertPdfToImages, extractPdfText } from "@/lib/pdfHelper";
 import { ArrowRight, AlertCircle, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 
@@ -64,10 +64,8 @@ export default function UploadPage() {
       setQpFile(file);
       setQuestionPaperName(file.name);
       
-      // Calculate meta info: e.g. "2MB • 2 Pages" or "2MB • Image"
       const sizeStr = getFileSizeString(file.size);
       if (file.type === "application/pdf") {
-        // Mock page count estimation or default
         setQpMeta(`${sizeStr} • 2 Pages`);
       } else {
         setQpMeta(`${sizeStr} • Image`);
@@ -86,7 +84,6 @@ export default function UploadPage() {
       setAsFile(file);
       setAnswerSheetName(file.name);
       
-      // Calculate meta info: e.g. "8MB • 6 Pages" or "8MB • Image"
       const sizeStr = getFileSizeString(file.size);
       if (file.type === "application/pdf") {
         setAsMeta(`${sizeStr} • 4 Pages`);
@@ -100,14 +97,17 @@ export default function UploadPage() {
     if (!qpFile || !asFile) return;
 
     setIsProcessing(true);
-    setIsSidebarCollapsed(true); // Auto collapse sidebar during processing state!
+    setIsSidebarCollapsed(true);
     setError(null);
 
     try {
       setProcessingStep("Reading Question Paper...");
       let qpImages: string[] = [];
+      let pdfText = "";
+
       if (qpFile.type === "application/pdf") {
         qpImages = await convertPdfToImages(qpFile);
+        pdfText = await extractPdfText(qpFile);
       } else {
         const b64 = await convertImageToBase64(qpFile);
         qpImages = [b64];
@@ -124,11 +124,11 @@ export default function UploadPage() {
       }
       setAnswerSheetImages(asImages);
 
-      setProcessingStep("Extracting Questions using Gemini...");
+      setProcessingStep("Extracting Questions...");
       const qpResponse = await fetch("/api/extract-questions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ images: qpImages }),
+        body: JSON.stringify({ images: qpImages, pdfText }),
       });
       if (!qpResponse.ok) throw new Error("Failed to extract questions from paper");
       const qpData = await qpResponse.json();

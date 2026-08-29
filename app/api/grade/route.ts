@@ -96,7 +96,7 @@ export async function POST(request: Request) {
 ${formattedItems}`;
 
       try {
-        const result = await generateContentWithRetry(generationConfig, prompt);
+        const result = await generateContentWithRetry(generationConfig, prompt, "grades");
         const textResponse = result.response.text();
         const parsed = JSON.parse(textResponse);
 

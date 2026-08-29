@@ -1,0 +1,25 @@
+{
+  "answerBlocks": [
+    {
+      "id": "ans-p0-b0",
+      "pageIndex": 0,
+      "boxNormalized": [100, 150, 250, 850],
+      "transcribedText": "Arteries carry oxygenated blood away from the heart to various parts of the body.",
+      "detectedQuestionLabel": "Q1"
+    },
+    {
+      "id": "ans-p0-b1",
+      "pageIndex": 0,
+      "boxNormalized": [300, 150, 500, 850],
+      "transcribedText": "The chloroplast is the primary organelle involved in photosynthesis in plant cells.",
+      "detectedQuestionLabel": "Q2"
+    },
+    {
+      "id": "ans-p0-b2",
+      "pageIndex": 0,
+      "boxNormalized": [550, 150, 800, 850],
+      "transcribedText": "Chloroplasts capture light energy using chlorophyll pigments to convert carbon dioxide and water into glucose and oxygen.",
+      "detectedQuestionLabel": "Q3"
+    }
+  ]
+}

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { base64ToGenerativePart, generateContentWithRetry } from "@/lib/gemini";
 import { SchemaType } from "@google/generative-ai";
 import { AnswerBlock } from "@/lib/types";
+import { fileCache } from "@/lib/cache";
 
 export async function POST(request: Request) {
   try {
@@ -10,11 +11,19 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "No images provided" }, { status: 400 });
     }
 
+    // 1. In-memory Hash Cache check
+    const fileHash = fileCache.getHash(images);
+    const cachedBlocks = fileCache.get<AnswerBlock[]>(fileHash);
+    if (cachedBlocks && cachedBlocks.length > 0) {
+      console.log(`[Cache Hit] Returning cached answer blocks for hash: ${fileHash.slice(0, 8)}`);
+      return NextResponse.json({ answerBlocks: cachedBlocks, cached: true });
+    }
+
     const allAnswerBlocks: AnswerBlock[] = [];
 
     // Process pages sequentially with rate-limit pacing to avoid 429 errors
     for (let pageIndex = 0; pageIndex < images.length; pageIndex++) {
-      if (pageIndex > 0) {
+      if (pageIndex > 0 && process.env.MOCK_GEMINI !== "true") {
         await new Promise((resolve) => setTimeout(resolve, 500));
       }
 
@@ -63,7 +72,7 @@ Tasks:
 4. Extract any question label that is written next to or at the beginning of the block (e.g., 'Q1', '2', 'a)'). If none, leave it empty.
 Output the result matching the JSON schema.`;
 
-      const result = await generateContentWithRetry(generationConfig, [prompt, imagePart]);
+      const result = await generateContentWithRetry(generationConfig, [prompt, imagePart], "answers");
       const textResponse = result.response.text();
       const parsed = JSON.parse(textResponse);
 
@@ -88,8 +97,14 @@ Output the result matching the JSON schema.`;
       });
 
       allAnswerBlocks.push(...blocks);
+
+      // If in dev mock mode, process single fixture page and break
+      if (process.env.MOCK_GEMINI === "true") {
+        break;
+      }
     }
 
+    fileCache.set(fileHash, allAnswerBlocks);
     return NextResponse.json({ answerBlocks: allAnswerBlocks });
   } catch (error) {
     console.error("Error in extract-answers API:", error);

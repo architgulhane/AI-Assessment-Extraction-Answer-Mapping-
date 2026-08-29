@@ -1,0 +1,22 @@
+{
+  "questions": [
+    {
+      "id": "q1",
+      "number": "1",
+      "text": "Which blood vessel carries blood away from the heart?",
+      "maxMarks": 2
+    },
+    {
+      "id": "q2",
+      "number": "2",
+      "text": "Which of the following organelles is primarily involved in photosynthesis?",
+      "maxMarks": 2
+    },
+    {
+      "id": "q3",
+      "number": "3",
+      "text": "Explain the role of chloroplasts in photosynthesis, naming the main pigments involved.",
+      "maxMarks": 5
+    }
+  ]
+}
