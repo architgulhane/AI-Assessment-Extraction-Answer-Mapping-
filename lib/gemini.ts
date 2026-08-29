@@ -27,47 +27,69 @@ export function base64ToGenerativePart(base64DataUrl: string) {
   };
 }
 
+const CANDIDATE_MODELS = [
+  "gemini-1.5-flash",
+  "gemini-2.5-flash",
+  "gemini-3.6-flash",
+  "gemini-1.5-pro",
+];
+
 export function getGeminiModel(generationConfig?: GenerationConfig): GenerativeModel {
-  // Use gemini-3.6-flash as default model (active, high-quota, latest feature set)
-  const modelName = process.env.GEMINI_MODEL_NAME || "gemini-3.6-flash";
+  const modelName = process.env.GEMINI_MODEL_NAME || CANDIDATE_MODELS[0];
   return genAI.getGenerativeModel({
     model: modelName,
     generationConfig,
   });
 }
 
+// Smart execution wrapper with automatic fallback across candidate models if 429 quota/rate limit is reached
 export async function generateContentWithRetry(
-  model: GenerativeModel,
-  contents: Parameters<GenerativeModel["generateContent"]>[0],
-  maxRetries = 3
+  generationConfig: unknown,
+  contents: Parameters<GenerativeModel["generateContent"]>[0]
 ): Promise<GenerateContentResult> {
-  let attempt = 0;
-  while (attempt <= maxRetries) {
+  let lastError: unknown = null;
+
+  for (let mIdx = 0; mIdx < CANDIDATE_MODELS.length; mIdx++) {
+    const modelName = CANDIDATE_MODELS[mIdx];
+    const model = genAI.getGenerativeModel({
+      model: modelName,
+      generationConfig: generationConfig as GenerationConfig,
+    });
+
     try {
       return await model.generateContent(contents);
     } catch (error: unknown) {
+      lastError = error;
       const err = error as { message?: string; status?: number };
       const errorMsg = err?.message || "";
       const status = err?.status;
 
-      const isRateLimit =
+      const isQuotaError =
         status === 429 ||
         errorMsg.includes("429") ||
-        errorMsg.includes("Too Many Requests") ||
+        errorMsg.includes("Quota exceeded") ||
         errorMsg.includes("QuotaFailure") ||
+        errorMsg.includes("Too Many Requests") ||
         errorMsg.includes("RESOURCE_EXHAUSTED");
 
-      if (isRateLimit && attempt < maxRetries) {
-        attempt++;
-        const backoffMs = Math.pow(2, attempt) * 1500;
+      if (isQuotaError && mIdx < CANDIDATE_MODELS.length - 1) {
         console.warn(
-          `[Gemini API 429 Rate Limit] Retrying attempt ${attempt}/${maxRetries} after ${backoffMs}ms delay...`
+          `[Quota Exceeded on ${modelName}] Automatically falling back to model ${CANDIDATE_MODELS[mIdx + 1]}...`
         );
-        await new Promise((resolve) => setTimeout(resolve, backoffMs));
+        continue;
+      } else if (isQuotaError) {
+        // All models rate limited, wait 3 seconds and retry last model once
+        await new Promise((r) => setTimeout(r, 3000));
+        try {
+          return await model.generateContent(contents);
+        } catch (retryErr) {
+          throw retryErr;
+        }
       } else {
         throw error;
       }
     }
   }
-  throw new Error("Failed to generate content after maximum retries.");
+
+  throw lastError || new Error("Failed to generate content after checking candidate models.");
 }

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { Question, AnswerBlock, MappedResult, GradedResult } from "@/lib/types";
-import { getGeminiModel, generateContentWithRetry } from "@/lib/gemini";
+import { generateContentWithRetry } from "@/lib/gemini";
 import { SchemaType } from "@google/generative-ai";
 
 export async function POST(request: Request) {
@@ -19,16 +19,13 @@ export async function POST(request: Request) {
     }
 
     const gradedResults: GradedResult[] = [];
+    const questionsToEvaluate: { question: Question; combinedText: string }[] = [];
 
-    // Process grading with pacing to avoid hitting rate limits
-    for (let i = 0; i < questions.length; i++) {
-      const question = questions[i];
-
-      // Find the mapped result for this question
+    // Filter answered vs unanswered questions
+    for (const question of questions) {
       const mapped = mappedResults.find((m) => m.questionId === question.id);
       const maxMarks = question.maxMarks || 5;
 
-      // Rule: Unanswered questions skip the API call entirely
       if (!mapped || !mapped.answerBlockIds || mapped.answerBlockIds.length === 0) {
         gradedResults.push({
           questionId: question.id,
@@ -39,11 +36,12 @@ export async function POST(request: Request) {
         continue;
       }
 
-      // Collect and concatenate all transcribed text from mapped blocks
-      const transcribedTexts = mapped.answerBlockIds.map((blockId) => {
-        const block = answerBlocks.find((b) => b.id === blockId);
-        return block ? block.transcribedText : "";
-      }).filter(text => text.trim() !== "");
+      const transcribedTexts = mapped.answerBlockIds
+        .map((blockId) => {
+          const block = answerBlocks.find((b) => b.id === blockId);
+          return block ? block.transcribedText : "";
+        })
+        .filter((t) => t.trim() !== "");
 
       if (transcribedTexts.length === 0) {
         gradedResults.push({
@@ -55,71 +53,96 @@ export async function POST(request: Request) {
         continue;
       }
 
-      // Small pacing delay between LLM calls
-      if (gradedResults.length > 0) {
-        await new Promise((resolve) => setTimeout(resolve, 300));
-      }
+      questionsToEvaluate.push({
+        question,
+        combinedText: transcribedTexts.join("\n\n"),
+      });
+    }
 
-      const combinedAnswerText = transcribedTexts.join("\n\n");
+    // Grade ALL answered questions in 1 single batched Gemini call!
+    if (questionsToEvaluate.length > 0) {
+      const formattedItems = questionsToEvaluate
+        .map((item, idx) => {
+          return `--- ITEM ${idx + 1} ---
+Question ID: "${item.question.id}"
+Question Text: "${item.question.text}"
+Max Marks: ${item.question.maxMarks || 5}
+Student Answer:
+"""
+${item.combinedText}
+"""`;
+        })
+        .join("\n\n");
 
-      // Text-only call for grading (no image)
-      const model = getGeminiModel({
+      const generationConfig = {
         responseMimeType: "application/json",
         responseSchema: {
           type: SchemaType.OBJECT,
           properties: {
-            score: {
-              type: SchemaType.NUMBER,
-              description: `A numeric score out of ${maxMarks}. You can award decimals or integers. Award partial credit for incomplete or partially correct reasoning.`,
-            },
-            feedback: {
-              type: SchemaType.STRING,
-              description: "A concise feedback of 1-2 sentences explaining the points awarded and what was correct/incorrect.",
+            grades: {
+              type: SchemaType.ARRAY,
+              items: {
+                type: SchemaType.OBJECT,
+                properties: {
+                  questionId: { type: SchemaType.STRING },
+                  score: {
+                    type: SchemaType.NUMBER,
+                    description: "Numeric score awarded based on Max Marks.",
+                  },
+                  feedback: {
+                    type: SchemaType.STRING,
+                    description: "Concise feedback (1-2 sentences).",
+                  },
+                },
+                required: ["questionId", "score", "feedback"],
+              },
             },
           },
-          required: ["score", "feedback"],
+          required: ["grades"],
         },
-      });
+      };
 
-      const prompt = `Grade the following student answer against the question.
-Question: "${question.text}"
-Max Marks: ${maxMarks}
+      const prompt = `Grade the following student answers for the corresponding questions.
+For each item, evaluate the student's answer and assign a fair score out of Max Marks along with concise feedback.
 
-Student's Transcribed Answer:
-"""
-${combinedAnswerText}
-"""
-
-Instructions:
-1. Assign a score between 0 and ${maxMarks}.
-2. Award partial credit for partially correct answers, incomplete reasoning, or good attempts. Do not require a verbatim textbook matching answer.
-3. Write a short explanation (1-2 sentences) of the grade in the feedback property.
-Output response matching the JSON schema.`;
+${formattedItems}`;
 
       try {
-        const result = await generateContentWithRetry(model, prompt);
+        const result = await generateContentWithRetry(generationConfig, prompt);
         const textResponse = result.response.text();
         const parsed = JSON.parse(textResponse);
 
-        let finalScore = Number(parsed.score);
-        if (isNaN(finalScore)) finalScore = 0;
-        finalScore = Math.max(0, Math.min(maxMarks, finalScore));
-        finalScore = Math.round(finalScore * 10) / 10;
+        if (Array.isArray(parsed.grades)) {
+          for (const g of parsed.grades) {
+            const item = questionsToEvaluate.find((q) => q.question.id === g.questionId);
+            const maxMarks = item ? item.question.maxMarks || 5 : 5;
 
-        gradedResults.push({
-          questionId: question.id,
-          score: finalScore,
-          maxMarks,
-          feedback: parsed.feedback || "Answer evaluated.",
-        });
+            let finalScore = Number(g.score);
+            if (isNaN(finalScore)) finalScore = 0;
+            finalScore = Math.max(0, Math.min(maxMarks, finalScore));
+            finalScore = Math.round(finalScore * 10) / 10;
+
+            gradedResults.push({
+              questionId: g.questionId,
+              score: finalScore,
+              maxMarks,
+              feedback: g.feedback || "Answer evaluated.",
+            });
+          }
+        }
       } catch (err) {
-        console.error(`Error grading question ${question.id}:`, err);
-        gradedResults.push({
-          questionId: question.id,
-          score: 0,
-          maxMarks,
-          feedback: `AI grading encountered an issue: ${err instanceof Error ? err.message : "safety block or parse failure"}.`,
-        });
+        console.error("Error in batched grading call:", err);
+        // Fallback for remaining items if LLM call fails
+        for (const item of questionsToEvaluate) {
+          if (!gradedResults.some((g) => g.questionId === item.question.id)) {
+            gradedResults.push({
+              questionId: item.question.id,
+              score: 0,
+              maxMarks: item.question.maxMarks || 5,
+              feedback: "Evaluation unavailable due to API limit.",
+            });
+          }
+        }
       }
     }
 

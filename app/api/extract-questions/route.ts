@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getGeminiModel, base64ToGenerativePart, generateContentWithRetry } from "@/lib/gemini";
+import { base64ToGenerativePart, generateContentWithRetry } from "@/lib/gemini";
 import { SchemaType } from "@google/generative-ai";
 
 export async function POST(request: Request) {
@@ -9,11 +9,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "No images provided" }, { status: 400 });
     }
 
-    // Convert base64 images to Gemini parts
     const imageParts = images.map((img) => base64ToGenerativePart(img));
 
-    // Get the model with responseSchema config
-    const model = getGeminiModel({
+    const generationConfig = {
       responseMimeType: "application/json",
       responseSchema: {
         type: SchemaType.OBJECT,
@@ -50,7 +48,7 @@ export async function POST(request: Request) {
         },
         required: ["questions"],
       },
-    });
+    };
 
     const prompt = `Analyze the provided question paper pages and extract every question in printed order.
 Rules:
@@ -59,10 +57,9 @@ Rules:
 3. Extract maximum marks/points if printed next to the question. If marks are not visible, default to 5.
 4. Output the results strictly formatted as JSON according to the schema.`;
 
-    const result = await generateContentWithRetry(model, [prompt, ...imageParts]);
+    const result = await generateContentWithRetry(generationConfig, [prompt, ...imageParts]);
     const textResponse = result.response.text();
     
-    // Parse response
     const parsedData = JSON.parse(textResponse);
     return NextResponse.json({ questions: parsedData.questions });
   } catch (error) {

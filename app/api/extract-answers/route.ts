@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getGeminiModel, base64ToGenerativePart, generateContentWithRetry } from "@/lib/gemini";
+import { base64ToGenerativePart, generateContentWithRetry } from "@/lib/gemini";
 import { SchemaType } from "@google/generative-ai";
 import { AnswerBlock } from "@/lib/types";
 
@@ -14,7 +14,6 @@ export async function POST(request: Request) {
 
     // Process pages sequentially with rate-limit pacing to avoid 429 errors
     for (let pageIndex = 0; pageIndex < images.length; pageIndex++) {
-      // Pacing delay between pages
       if (pageIndex > 0) {
         await new Promise((resolve) => setTimeout(resolve, 500));
       }
@@ -22,8 +21,7 @@ export async function POST(request: Request) {
       const imgBase64 = images[pageIndex];
       const imagePart = base64ToGenerativePart(imgBase64);
 
-      // Get model with responseSchema config
-      const model = getGeminiModel({
+      const generationConfig = {
         responseMimeType: "application/json",
         responseSchema: {
           type: SchemaType.OBJECT,
@@ -55,7 +53,7 @@ export async function POST(request: Request) {
           },
           required: ["answerBlocks"],
         },
-      });
+      };
 
       const prompt = `Analyze this page of a student's answer sheet.
 Tasks:
@@ -65,7 +63,7 @@ Tasks:
 4. Extract any question label that is written next to or at the beginning of the block (e.g., 'Q1', '2', 'a)'). If none, leave it empty.
 Output the result matching the JSON schema.`;
 
-      const result = await generateContentWithRetry(model, [prompt, imagePart]);
+      const result = await generateContentWithRetry(generationConfig, [prompt, imagePart]);
       const textResponse = result.response.text();
       const parsed = JSON.parse(textResponse);
 
