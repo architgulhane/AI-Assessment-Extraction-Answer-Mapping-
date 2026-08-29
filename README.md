@@ -1,36 +1,80 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# VedaAI — AI Assessment Extraction & Answer Mapping
 
-## Getting Started
+VedaAI is an intelligent assessment evaluation tool designed for educators. It enables uploading a printed question paper along with a student's handwritten answer sheet, automatically extracting questions, locating and transcribing answers, mapping answers to questions, providing interactive bounding box highlight overlays, and performing automatic AI-based grading and feedback.
 
-First, run the development server:
+## 🔗 Project Links
+- **GitHub Repository**: [architgulhane/AI-Assessment-Extraction-Answer-Mapping-](https://github.com/architgulhane/AI-Assessment-Extraction-Answer-Mapping-)
+- **Live Deployed URL**: [https://veda-ai-assessment.vercel.app](https://veda-ai-assessment.vercel.app) *(Deployable to Vercel instantly by connecting the GitHub repository)*
+
+---
+
+## 🛠️ Architecture & Technical Approach
+
+VedaAI is built as a single-session, in-memory, serverless web application using a modern tech stack:
+
+1. **Framework**: Next.js 14 (App Router) with TypeScript.
+2. **Styling**: Tailwind CSS for a high-fidelity SaaS dashboard (Figma replication).
+3. **PDF Page Splitting**: `pdfjs-dist` is used on the client-side to render PDF pages into images. This offloads PDF processing from the serverless functions (improving speed and memory footprint) and converts documents into standard JPEG format directly.
+4. **Question Extraction**: Done using **Gemini 2.5 Flash** with a structured output schema (`responseSchema`) to enforce type-safety on the parsed questions in printed order.
+5. **Answer block OCR & Bounding Boxes**: Evaluated page-by-page in parallel using **Gemini 2.5 Flash**. The VLM identifies handwritten answer blocks, outputs their normalized coordinate boxes (`[y_min, x_min, y_max, x_max]` on a 0-1000 scale), and transcribes the handwritten text.
+6. **Mapping Engine**:
+   - **Pass 1 (Explicit Label Matching)**: Maps blocks with written identifiers (e.g. "Q1", "2.") directly to matching question numbers.
+   - **Pass 2 (Embedding Fallback)**: For unlabeled blocks, maps them using cosine similarity computed in-memory between E5 query embeddings of questions and E5 passage embeddings of answer transcriptions.
+   - **Fallback Heuristic**: Token-overlap search is used if the Hugging Face API hits rate limits or is down.
+7. **Grading & Feedback**: Executed in parallel using a **text-only Gemini 2.5 Flash** call per mapped question to evaluate answers out of their max marks, support partial credit, and write brief constructive feedback. Unanswered questions skip the API call entirely (defaulting to a score of 0 and "Not answered" feedback) to optimize latency and api usage.
+8. **Storage**: Completely in-memory using React Context (`lib/context.tsx`) — no database, vector store, or persistent storage is required by design.
+
+---
+
+## 🤖 AI Models & APIs Used
+
+- **OCR, Extraction, Bounding Boxes, & Grading**: Google Gemini 2.5 Flash via `GoogleGenerativeAI` SDK (`gemini-2.5-flash`).
+- **Semantic Text Embeddings**: `intfloat/e5-base-v2` via the Hugging Face Inference API.
+
+---
+
+## ⚙️ Environment Variables
+
+Both variables must be configured in your Vercel project settings or `.env.local` file:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+GEMINI_API_KEY=your-google-ai-studio-key
+HUGGINGFACE_API_KEY=your-huggingface-inference-token
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+---
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## 🚀 Getting Started (Local Development)
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### 1. Clone the repository
+```bash
+git clone https://github.com/architgulhane/AI-Assessment-Extraction-Answer-Mapping-.git
+cd AI-Assessment-Extraction-Answer-Mapping-
+```
 
-## Learn More
+### 2. Install dependencies
+```bash
+npm install
+```
 
-To learn more about Next.js, take a look at the following resources:
+### 3. Add environment variables
+Create a `.env.local` file:
+```bash
+GEMINI_API_KEY=your_key
+HUGGINGFACE_API_KEY=your_key
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### 4. Run the development server
+```bash
+npm run dev
+```
+Open [http://localhost:3000](http://localhost:3000) to view the application.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+---
 
-## Deploy on Vercel
+## 💡 Assumptions & Limitations
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- **Single Student Evaluation**: Designed for evaluating a single student's answer sheet per session (no batch evaluation of multiple students).
+- **VLM-Based Bounding Boxes**: Bounding boxes are generated by Gemini Flash and represent loose handwritten regions, which are scaled dynamically using CSS percentage layouts.
+- **Grading Variations**: Grading is LLM-judged based on question text and transcribed answer text, which may vary slightly across runs.
+- **State Persistence**: State is maintained in-memory per session; refreshing the browser will wipe current data and redirect the user back to the upload screen.
