@@ -9,7 +9,7 @@ function parseQuestionsFromText(text: string): Question[] {
   const lines = text.split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
   const questions: Question[] = [];
 
-  // Match patterns like Q1., Q1), 1., 1), Question 1:, 11a., 11(a)
+  // Match patterns like Q1., Q1), 1., 1), Question 1:, 11a., 11(a), 26., 26)
   const questionRegex = /^(?:Q|Question\s*)?(\d+)\s*(?:\.|\)|:|\s+([a-z])[\.\)]?)\s*(.*)/i;
 
   let currentQuestion: Question | null = null;
@@ -17,7 +17,7 @@ function parseQuestionsFromText(text: string): Question[] {
   for (const line of lines) {
     const match = line.match(questionRegex);
     if (match) {
-      if (currentQuestion && currentQuestion.text.length > 5) {
+      if (currentQuestion && currentQuestion.text.length > 3) {
         questions.push(currentQuestion);
       }
 
@@ -25,7 +25,6 @@ function parseQuestionsFromText(text: string): Question[] {
       const subPartStr = match[2] ? match[2].toLowerCase() : undefined;
       const restText = match[3] || "";
 
-      // Extract marks if present like [5 marks], (2 Marks), [5]
       const marksMatch = restText.match(/\[(\d+)\s*marks?\]|\((\d+)\s*marks?\)|\[(\d+)\]/i);
       const maxMarks = marksMatch ? Number(marksMatch[1] || marksMatch[2] || marksMatch[3]) : 5;
 
@@ -43,7 +42,7 @@ function parseQuestionsFromText(text: string): Question[] {
     }
   }
 
-  if (currentQuestion && currentQuestion.text.length > 5) {
+  if (currentQuestion && currentQuestion.text.length > 3) {
     questions.push(currentQuestion);
   }
 
@@ -52,12 +51,12 @@ function parseQuestionsFromText(text: string): Question[] {
 
 export async function POST(request: Request) {
   try {
-    const { images, pdfText } = await request.json() as { images: string[]; pdfText?: string };
+    const { images, pdfText } = (await request.json()) as { images: string[]; pdfText?: string };
     if (!images || !Array.isArray(images) || images.length === 0) {
       return NextResponse.json({ error: "No images provided" }, { status: 400 });
     }
 
-    // 1. In-Memory Hash Cache check (re-uploads = 0 API calls)
+    // 1. In-Memory Hash Cache check
     const fileHash = fileCache.getHash(images);
     const cachedQuestions = fileCache.get<Question[]>(fileHash);
     if (cachedQuestions && cachedQuestions.length > 0) {
@@ -65,17 +64,17 @@ export async function POST(request: Request) {
       return NextResponse.json({ questions: cachedQuestions, cached: true });
     }
 
-    // 2. Digital PDF Text Extraction Check (typed PDFs = 0 Gemini Vision calls)
+    // 2. Digital PDF Text Extraction Check - only use if it extracts at least 5 questions
     if (pdfText && pdfText.trim().length > 50) {
       const parsedQuestions = parseQuestionsFromText(pdfText);
-      if (parsedQuestions.length > 0) {
+      if (parsedQuestions.length >= 5) {
         console.log(`[Text Extraction] Parsed ${parsedQuestions.length} questions deterministically from digital PDF text.`);
         fileCache.set(fileHash, parsedQuestions);
         return NextResponse.json({ questions: parsedQuestions, method: "digital-text-parser" });
       }
     }
 
-    // 3. Fallback to Gemini Vision API call
+    // 3. Complete Gemini Vision Extraction for Question Paper
     const imageParts = images.map((img) => base64ToGenerativePart(img));
 
     const generationConfig = {
@@ -90,15 +89,15 @@ export async function POST(request: Request) {
               properties: {
                 id: {
                   type: SchemaType.STRING,
-                  description: "Unique string id for the question, e.g. 'q1', 'q11a', 'q11b'. Ensure it is lowercase, starts with 'q', and combines number + subPart.",
+                  description: "Unique string id for the question, e.g. 'q1', 'q22', 'q26a'. Lowercase, starts with 'q', combining number + subPart.",
                 },
                 number: {
                   type: SchemaType.STRING,
-                  description: "The printed number of the question, e.g., '1', '11'.",
+                  description: "The printed number of the question, e.g., '1', '22', '26'.",
                 },
                 subPart: {
                   type: SchemaType.STRING,
-                  description: "The printed sub-part letter if present, e.g., 'a', 'b', 'c'. Omit if none.",
+                  description: "The printed sub-part letter if present, e.g., 'a', 'b'. Omit if none.",
                 },
                 text: {
                   type: SchemaType.STRING,
@@ -106,7 +105,7 @@ export async function POST(request: Request) {
                 },
                 maxMarks: {
                   type: SchemaType.NUMBER,
-                  description: "The maximum marks or points allocated to this question (usually in brackets at the end of the question). Omit or set to 5 if not visible.",
+                  description: "Maximum marks allocated to this question. Default to 5 if not visible.",
                 },
               },
               required: ["id", "number", "text"],
@@ -117,12 +116,12 @@ export async function POST(request: Request) {
       },
     };
 
-    const prompt = `Analyze the provided question paper pages and extract every question in printed order.
+    const prompt = `Examine ALL pages of this question paper. Extract EVERY SINGLE printed question from the start of the paper to the very last page.
 Rules:
-1. Treat labeled sub-parts (e.g., (a), (b), or a., b.) as separate entries with a shared root number (e.g. Question 11 split into 11a and 11b).
-2. Preserve original question numbers exactly as printed.
-3. Extract maximum marks/points if printed next to the question. If marks are not visible, default to 5.
-4. Output the results strictly formatted as JSON according to the schema.`;
+1. Do not skip any question numbers. Include all questions (e.g. 1 to 34 or all section questions).
+2. Treat labeled sub-parts (e.g., (a), (b)) as separate entries with shared root number (e.g. 11a, 11b).
+3. Preserve original printed question numbers exactly.
+4. Output strictly as JSON adhering to the schema.`;
 
     const result = await generateContentWithRetry(generationConfig, [prompt, ...imageParts], "questions");
     const textResponse = result.response.text();
