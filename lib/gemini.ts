@@ -28,7 +28,8 @@ export function base64ToGenerativePart(base64DataUrl: string) {
 }
 
 export function getGeminiModel(generationConfig?: GenerationConfig): GenerativeModel {
-  const modelName = process.env.GEMINI_MODEL_NAME || "gemini-1.5-flash";
+  // Use gemini-3.6-flash as default model (active, high-quota, latest feature set)
+  const modelName = process.env.GEMINI_MODEL_NAME || "gemini-3.6-flash";
   return genAI.getGenerativeModel({
     model: modelName,
     generationConfig,
