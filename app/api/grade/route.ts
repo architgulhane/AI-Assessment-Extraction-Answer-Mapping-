@@ -59,20 +59,13 @@ export async function POST(request: Request) {
       });
     }
 
-    // Grade ALL answered questions in 1 single batched Gemini call!
+    // Grade ALL answered questions in 1 minimal batched call (score only, no text feedback)
     if (questionsToEvaluate.length > 0) {
       const formattedItems = questionsToEvaluate
         .map((item, idx) => {
-          return `--- ITEM ${idx + 1} ---
-Question ID: "${item.question.id}"
-Question Text: "${item.question.text}"
-Max Marks: ${item.question.maxMarks || 5}
-Student Answer:
-"""
-${item.combinedText}
-"""`;
+          return `Item ${idx + 1}: ID="${item.question.id}", MaxMarks=${item.question.maxMarks || 5}, Question="${item.question.text}", Answer="${item.combinedText}"`;
         })
-        .join("\n\n");
+        .join("\n");
 
       const generationConfig = {
         responseMimeType: "application/json",
@@ -87,14 +80,10 @@ ${item.combinedText}
                   questionId: { type: SchemaType.STRING },
                   score: {
                     type: SchemaType.NUMBER,
-                    description: "Numeric score awarded based on Max Marks.",
-                  },
-                  feedback: {
-                    type: SchemaType.STRING,
-                    description: "Concise feedback (1-2 sentences).",
+                    description: "Numeric score awarded.",
                   },
                 },
-                required: ["questionId", "score", "feedback"],
+                required: ["questionId", "score"],
               },
             },
           },
@@ -102,8 +91,7 @@ ${item.combinedText}
         },
       };
 
-      const prompt = `Grade the following student answers for the corresponding questions.
-For each item, evaluate the student's answer and assign a fair score out of Max Marks along with concise feedback.
+      const prompt = `Assign a numerical score for each item based on answer correctness against Max Marks. Do not provide any explanation or text feedback.
 
 ${formattedItems}`;
 
@@ -126,20 +114,19 @@ ${formattedItems}`;
               questionId: g.questionId,
               score: finalScore,
               maxMarks,
-              feedback: g.feedback || "Answer evaluated.",
+              feedback: `Score awarded: ${finalScore}/${maxMarks}`,
             });
           }
         }
       } catch (err) {
-        console.error("Error in batched grading call:", err);
-        // Fallback for remaining items if LLM call fails
+        console.error("Error in minimal score grading call:", err);
         for (const item of questionsToEvaluate) {
           if (!gradedResults.some((g) => g.questionId === item.question.id)) {
             gradedResults.push({
               questionId: item.question.id,
               score: 0,
               maxMarks: item.question.maxMarks || 5,
-              feedback: "Evaluation unavailable due to API limit.",
+              feedback: "Score unavailable.",
             });
           }
         }
