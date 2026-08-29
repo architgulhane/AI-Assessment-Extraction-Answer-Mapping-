@@ -2,30 +2,16 @@ import { NextResponse } from "next/server";
 import { Question, AnswerBlock, MappedResult } from "@/lib/types";
 import { getEmbeddings, cosineSimilarity } from "@/lib/embeddings";
 
-// Helper to normalize labels for explicit matching (e.g. "Q11(a)" -> "11a", "q2" -> "2", "26." -> "26")
-function normalizeLabel(label: string): string {
-  let clean = label.toLowerCase().replace(/[^a-z0-9]/g, "");
-  if (clean.startsWith("question")) {
-    clean = clean.substring(8);
+// Helper to extract clean question number string (e.g. "Q26." -> "26", "26(a)" -> "26a", "Question 26" -> "26")
+function extractNumber(text: string): string {
+  if (!text) return "";
+  let clean = text.toLowerCase().trim();
+  clean = clean.replace(/^(?:question|answer|ans|q)\s*/i, "");
+  const match = clean.match(/^(\d+[a-z]?)/i);
+  if (match) {
+    return match[1].toLowerCase();
   }
-  if (clean.startsWith("q")) {
-    clean = clean.substring(1);
-  }
-  return clean;
-}
-
-// Substring/token overlap helper to fall back to if Hugging Face API is down or rate-limited
-function getSimpleTextSimilarity(text1: string, text2: string): number {
-  const words1 = new Set(text1.toLowerCase().split(/\s+/).filter((w) => w.length > 2));
-  const words2 = new Set(text2.toLowerCase().split(/\s+/).filter((w) => w.length > 2));
-  if (words1.size === 0 || words2.size === 0) return 0;
-
-  let intersection = 0;
-  words1.forEach((w) => {
-    if (words2.has(w)) intersection++;
-  });
-
-  return intersection / Math.max(words1.size, words2.size);
+  return clean.replace(/[^a-z0-9]/g, "");
 }
 
 export async function POST(request: Request) {
@@ -42,51 +28,55 @@ export async function POST(request: Request) {
     const mappedResults: MappedResult[] = [];
     const matchedBlockIds = new Set<string>();
 
-    // Step 1: Explicit Label Matching
-    const questionNormalMap = new Map<string, Question>();
+    // Build lookup maps for questions
+    const questionByNum = new Map<string, Question>();
     questions.forEach((q) => {
-      const normId = normalizeLabel(q.id);
-      const normNum = normalizeLabel(q.number + (q.subPart || ""));
-      questionNormalMap.set(normId, q);
-      questionNormalMap.set(normNum, q);
-      questionNormalMap.set(normalizeLabel(q.number), q);
+      const numKey = extractNumber(q.number + (q.subPart || ""));
+      const simpleNumKey = extractNumber(q.number);
+      const idKey = extractNumber(q.id);
+
+      if (numKey) questionByNum.set(numKey, q);
+      if (simpleNumKey && !questionByNum.has(simpleNumKey)) questionByNum.set(simpleNumKey, q);
+      if (idKey && !questionByNum.has(idKey)) questionByNum.set(idKey, q);
     });
 
     const explicitMappings = new Map<string, string[]>();
 
+    // Pass 1: Out-of-Order Explicit Number Matching
     answerBlocks.forEach((block) => {
-      let label = block.detectedQuestionLabel;
-      
-      // Fallback: If detectedQuestionLabel is empty, try parsing leading number from transcribedText (e.g. "26. Distinguish...")
-      if (!label || label.trim() === "") {
-        const leadingMatch = block.transcribedText.match(/^(?:Q|Question\s*)?(\d+[a-z]?)\b[\.\):]?/i);
-        if (leadingMatch) {
-          label = leadingMatch[1];
+      let extractedLabel = block.detectedQuestionLabel || "";
+
+      // Fallback: extract leading label from transcribed text (e.g. "26. Distinguish...", "Q26: ...")
+      if (!extractedLabel || extractedLabel.trim() === "") {
+        const textMatch = block.transcribedText.match(/^(?:Q|Question|Ans|Answer)?\s*(\d+[a-z]?)\b[\.\):]?/i);
+        if (textMatch) {
+          extractedLabel = textMatch[1];
         }
       }
 
-      if (label && label.trim() !== "") {
-        const normLabel = normalizeLabel(label);
-        let matchedQuestion = questionNormalMap.get(normLabel);
+      const cleanLabel = extractNumber(extractedLabel);
 
-        if (!matchedQuestion) {
-          matchedQuestion = questions.find(
-            (q) =>
-              normalizeLabel(q.number) === normLabel ||
-              normalizeLabel(q.id) === normLabel ||
-              normalizeLabel(q.number + (q.subPart || "")) === normLabel
-          );
+      if (cleanLabel) {
+        let matchedQ = questionByNum.get(cleanLabel);
+
+        // Try digits-only fallback
+        if (!matchedQ) {
+          const digitsOnly = cleanLabel.replace(/[^0-9]/g, "");
+          if (digitsOnly) {
+            matchedQ = questions.find((q) => extractNumber(q.number) === digitsOnly);
+          }
         }
 
-        if (matchedQuestion) {
-          const list = explicitMappings.get(matchedQuestion.id) || [];
+        if (matchedQ) {
+          const list = explicitMappings.get(matchedQ.id) || [];
           list.push(block.id);
-          explicitMappings.set(matchedQuestion.id, list);
+          explicitMappings.set(matchedQ.id, list);
           matchedBlockIds.add(block.id);
         }
       }
     });
 
+    // Save Pass 1 explicit matches
     explicitMappings.forEach((blockIds, questionId) => {
       mappedResults.push({
         questionId,
@@ -95,23 +85,21 @@ export async function POST(request: Request) {
       });
     });
 
-    // Step 2: Embedding / Similarity Fallback Matching
-    const unmatchedBlocks = answerBlocks.filter((b) => !matchedBlockIds.has(b.id));
-    const unmatchedQuestions = questions.filter(
-      (q) => !mappedResults.some((m) => m.questionId === q.id)
-    );
+    // Pass 2: Semantic Similarity Fallback for remaining unmatched blocks
+    const remainingBlocks = answerBlocks.filter((b) => !matchedBlockIds.has(b.id));
+    const remainingQuestions = questions.filter((q) => !mappedResults.some((m) => m.questionId === q.id));
 
-    if (unmatchedBlocks.length > 0 && unmatchedQuestions.length > 0) {
+    if (remainingBlocks.length > 0 && remainingQuestions.length > 0) {
       try {
         const questionEmbeddings = await Promise.all(
-          unmatchedQuestions.map(async (q) => {
+          remainingQuestions.map(async (q) => {
             const vector = await getEmbeddings(`query: ${q.text}`);
             return { questionId: q.id, vector };
           })
         );
 
         const blockEmbeddings = await Promise.all(
-          unmatchedBlocks.map(async (b) => {
+          remainingBlocks.map(async (b) => {
             const vector = await getEmbeddings(`passage: ${b.transcribedText}`);
             return { blockId: b.id, vector };
           })
@@ -129,7 +117,7 @@ export async function POST(request: Request) {
             }
           });
 
-          if (bestScore >= 0.4 && bestQuestionId) {
+          if (bestScore >= 0.35 && bestQuestionId) {
             mappedResults.push({
               questionId: bestQuestionId,
               answerBlockIds: [be.blockId],
@@ -139,35 +127,13 @@ export async function POST(request: Request) {
             matchedBlockIds.add(be.blockId);
           }
         });
-      } catch (embError) {
-        console.warn("Hugging Face Embedding API failed, falling back to substring overlap heuristic.", embError);
-
-        unmatchedBlocks.forEach((b) => {
-          let bestQuestionId = "";
-          let bestScore = -1;
-
-          unmatchedQuestions.forEach((q) => {
-            const score = getSimpleTextSimilarity(q.text, b.transcribedText);
-            if (score > bestScore) {
-              bestScore = score;
-              bestQuestionId = q.id;
-            }
-          });
-
-          if (bestScore >= 0.25 && bestQuestionId) {
-            mappedResults.push({
-              questionId: bestQuestionId,
-              answerBlockIds: [b.id],
-              matchMethod: "embedding-fallback",
-              matchConfidence: parseFloat(bestScore.toFixed(3)),
-            });
-            matchedBlockIds.add(b.id);
-          }
-        });
+      } catch (embErr) {
+        console.warn("Embedding fallback failed:", embErr);
       }
     }
 
     // Step 3: Handle Unanswered Questions
+    // Any question in the Question Paper without a matching answer block gets marked as Unanswered
     questions.forEach((q) => {
       const isMapped = mappedResults.some((r) => r.questionId === q.id);
       if (!isMapped) {
