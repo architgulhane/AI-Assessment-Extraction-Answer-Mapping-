@@ -7,50 +7,90 @@ import {
   ClipboardList,
   FileSpreadsheet,
   FolderOpen,
-  Settings,
-  HelpCircle,
+  ChevronRight,
+  ChevronLeft,
+  Sparkles,
+  School,
 } from "lucide-react";
 import Link from "next/link";
 
-export default function Sidebar() {
+type SidebarProps = {
+  isCollapsed?: boolean;
+  onToggleCollapse?: (collapsed: boolean) => void;
+};
 
+export default function Sidebar({ isCollapsed = false, onToggleCollapse }: SidebarProps) {
   const navItems = [
     { name: "Home", icon: Home, href: "#", disabled: true },
     { name: "My Classroom", icon: Users, href: "#", disabled: true },
     { name: "Assignments", icon: ClipboardList, href: "#", disabled: true },
     { name: "Exams", icon: FileSpreadsheet, href: "/", disabled: false },
     { name: "My Library", icon: FolderOpen, href: "#", disabled: true },
-    { name: "Settings", icon: Settings, href: "#", disabled: true },
   ];
 
+  const handleToggle = () => {
+    if (onToggleCollapse) {
+      onToggleCollapse(!isCollapsed);
+    }
+  };
+
   return (
-    <aside className="w-64 border-r border-slate-200 bg-white flex flex-col h-full shrink-0">
+    <aside
+      className={`border-r border-slate-200 bg-white flex flex-col h-full shrink-0 transition-all duration-300 ${
+        isCollapsed ? "w-20" : "w-64"
+      }`}
+    >
       {/* Brand logo */}
-      <div className="h-16 flex items-center px-6 border-b border-slate-200 gap-2.5">
-        <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center text-white font-bold text-lg shadow-sm shadow-indigo-600/30">
-          V
+      <div className={`h-16 flex items-center border-b border-slate-200 shrink-0 ${
+        isCollapsed ? "justify-center px-0" : "px-6 gap-3"
+      }`}>
+        <div className="w-10 h-10 rounded-xl bg-slate-900 flex items-center justify-center text-white shadow-sm shrink-0">
+          {/* Stylized rounded box V logo */}
+          <svg
+            className="w-5 h-5 fill-current"
+            viewBox="0 0 24 24"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-2 7.5l-4.5 9-4.5-9h2.2l2.3 4.6 2.3-4.6H17z" />
+          </svg>
         </div>
-        <div className="flex flex-col">
-          <span className="font-bold text-slate-900 tracking-tight text-sm leading-none">VedaAI</span>
-          <span className="text-[10px] text-slate-400 mt-0.5 leading-none">Assessment Mapping</span>
-        </div>
+        {!isCollapsed && (
+          <span className="font-bold text-slate-800 text-lg tracking-tight">VedaAI</span>
+        )}
+      </div>
+
+      {/* AI Teacher's Toolkit Pill */}
+      <div className={`px-4 py-4 border-b border-slate-100 ${isCollapsed ? "flex justify-center" : ""}`}>
+        {isCollapsed ? (
+          <button
+            className="w-10 h-10 rounded-full border border-orange-500 bg-zinc-800 text-white flex items-center justify-center shadow-md hover:bg-zinc-700 transition-colors"
+            title="AI Teacher&apos;s Toolkit"
+          >
+            <Sparkles className="w-4 h-4 text-orange-400" />
+          </button>
+        ) : (
+          <button className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-full border border-orange-500 bg-zinc-800 hover:bg-zinc-700 text-white text-xs font-bold transition-all shadow-md">
+            <Sparkles className="w-4 h-4 text-orange-400" />
+            <span>AI Teacher&apos;s Toolkit</span>
+          </button>
+        )}
       </div>
 
       {/* Nav links */}
-      <nav className="flex-1 px-4 py-6 space-y-1.5">
+      <nav className="flex-1 px-3 py-6 space-y-1">
         {navItems.map((item) => {
           const Icon = item.icon;
-          // In our app, the path is either "/" (upload page) or "/review" (review page).
-          // Both are considered "Exams" context, so if name is "Exams", it's active.
           const isActive = item.name === "Exams";
 
           return (
             <Link
               key={item.name}
               href={item.disabled ? "#" : item.href}
-              className={`flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 ${
+              className={`flex items-center rounded-xl text-sm font-semibold transition-all duration-200 ${
+                isCollapsed ? "justify-center p-2.5" : "px-4 py-3 gap-3"
+              } ${
                 isActive
-                  ? "bg-indigo-50 text-indigo-700 font-semibold"
+                  ? "bg-slate-100 text-slate-900 font-bold"
                   : item.disabled
                   ? "text-slate-400 cursor-not-allowed hover:bg-slate-50/50"
                   : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
@@ -60,28 +100,53 @@ export default function Sidebar() {
                   e.preventDefault();
                 }
               }}
+              title={isCollapsed ? item.name : undefined}
             >
               <Icon
                 className={`w-5 h-5 ${
-                  isActive ? "text-indigo-600" : "text-slate-400 group-hover:text-slate-600"
+                  isActive ? "text-slate-800" : "text-slate-400 group-hover:text-slate-600"
                 }`}
               />
-              <span>{item.name}</span>
+              {!isCollapsed && <span>{item.name}</span>}
             </Link>
           );
         })}
       </nav>
 
-      {/* Sidebar Footer / Help */}
-      <div className="p-4 border-t border-slate-200">
-        <a
-          href="#"
-          className="flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-sm font-medium text-slate-500 hover:bg-slate-50 hover:text-slate-900 transition-colors"
-          onClick={(e) => e.preventDefault()}
+      {/* School card bottom or collapse indicator */}
+      <div className={`p-4 border-t border-slate-100 ${isCollapsed ? "flex flex-col items-center gap-4" : ""}`}>
+        {isCollapsed ? (
+          <div className="w-10 h-10 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-500 shadow-inner">
+            <School className="w-5 h-5" />
+          </div>
+        ) : (
+          <div className="flex items-center gap-3 bg-slate-50 border border-slate-200 rounded-xl p-3.5 shadow-inner">
+            <div className="w-10 h-10 rounded-lg bg-white border border-slate-200 flex items-center justify-center text-slate-500 shadow-sm shrink-0">
+              <School className="w-5 h-5" />
+            </div>
+            <div className="flex flex-col min-w-0">
+              <span className="text-xs font-bold text-slate-800 leading-tight truncate">Delhi Public School</span>
+              <span className="text-[10px] text-slate-400 leading-none truncate mt-0.5">Bokaro Steel City</span>
+            </div>
+          </div>
+        )}
+
+        {/* Collapse toggle button */}
+        <button
+          onClick={handleToggle}
+          className={`flex items-center text-slate-400 hover:text-slate-700 transition-colors mt-4 w-full ${
+            isCollapsed ? "justify-center p-1" : "px-2 py-1 justify-between text-xs font-semibold"
+          }`}
         >
-          <HelpCircle className="w-5 h-5 text-slate-400" />
-          <span>Help & Support</span>
-        </a>
+          {isCollapsed ? (
+            <ChevronRight className="w-5 h-5" />
+          ) : (
+            <>
+              <span>Collapse Sidebar</span>
+              <ChevronLeft className="w-5 h-5" />
+            </>
+          )}
+        </button>
       </div>
     </aside>
   );
