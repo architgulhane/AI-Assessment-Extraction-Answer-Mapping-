@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { genAI, base64ToGenerativePart } from "@/lib/gemini";
+import { getGeminiModel, base64ToGenerativePart, generateContentWithRetry } from "@/lib/gemini";
 import { SchemaType } from "@google/generative-ai";
 import { AnswerBlock } from "@/lib/types";
 
@@ -10,45 +10,50 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "No images provided" }, { status: 400 });
     }
 
-    // Process each page in parallel
-    const pagePromises = images.map(async (imgBase64, pageIndex) => {
+    const allAnswerBlocks: AnswerBlock[] = [];
+
+    // Process pages sequentially with rate-limit pacing to avoid 429 errors
+    for (let pageIndex = 0; pageIndex < images.length; pageIndex++) {
+      // Pacing delay between pages
+      if (pageIndex > 0) {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+
+      const imgBase64 = images[pageIndex];
       const imagePart = base64ToGenerativePart(imgBase64);
 
       // Get model with responseSchema config
-      const model = genAI.getGenerativeModel({
-        model: "gemini-2.5-flash",
-        generationConfig: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: SchemaType.OBJECT,
-            properties: {
-              answerBlocks: {
-                type: SchemaType.ARRAY,
-                items: {
-                  type: SchemaType.OBJECT,
-                  properties: {
-                    boxNormalized: {
-                      type: SchemaType.ARRAY,
-                      description: "Normalized bounding box for the handwritten block on the page, using the format [y_min, x_min, y_max, x_max] with integers from 0 to 1000. Be as accurate as possible to fit just the handwritten text of this single answer.",
-                      items: {
-                        type: SchemaType.NUMBER,
-                      },
-                    },
-                    transcribedText: {
-                      type: SchemaType.STRING,
-                      description: "Accurately transcribe all handwritten text inside this bounding box. Fix minor handwriting ambiguities if needed to make it readable.",
-                    },
-                    detectedQuestionLabel: {
-                      type: SchemaType.STRING,
-                      description: "The printed or handwritten question label nearby indicating which question is being answered (e.g. '1', 'Q2', '11.a', '11(b)'). Empty if no label is visible.",
+      const model = getGeminiModel({
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: SchemaType.OBJECT,
+          properties: {
+            answerBlocks: {
+              type: SchemaType.ARRAY,
+              items: {
+                type: SchemaType.OBJECT,
+                properties: {
+                  boxNormalized: {
+                    type: SchemaType.ARRAY,
+                    description: "Normalized bounding box for the handwritten block on the page, using the format [y_min, x_min, y_max, x_max] with integers from 0 to 1000. Be as accurate as possible to fit just the handwritten text of this single answer.",
+                    items: {
+                      type: SchemaType.NUMBER,
                     },
                   },
-                  required: ["boxNormalized", "transcribedText"],
+                  transcribedText: {
+                    type: SchemaType.STRING,
+                    description: "Accurately transcribe all handwritten text inside this bounding box. Fix minor handwriting ambiguities if needed to make it readable.",
+                  },
+                  detectedQuestionLabel: {
+                    type: SchemaType.STRING,
+                    description: "The printed or handwritten question label nearby indicating which question is being answered (e.g. '1', 'Q2', '11.a', '11(b)'). Empty if no label is visible.",
+                  },
                 },
+                required: ["boxNormalized", "transcribedText"],
               },
             },
-            required: ["answerBlocks"],
           },
+          required: ["answerBlocks"],
         },
       });
 
@@ -60,12 +65,11 @@ Tasks:
 4. Extract any question label that is written next to or at the beginning of the block (e.g., 'Q1', '2', 'a)'). If none, leave it empty.
 Output the result matching the JSON schema.`;
 
-      const result = await model.generateContent([prompt, imagePart]);
+      const result = await generateContentWithRetry(model, [prompt, imagePart]);
       const textResponse = result.response.text();
       const parsed = JSON.parse(textResponse);
 
       const blocks: AnswerBlock[] = (parsed.answerBlocks || []).map((b: { boxNormalized?: number[]; transcribedText?: string; detectedQuestionLabel?: string }, blockIndex: number) => {
-        // Ensure boxNormalized is exactly [y_min, x_min, y_max, x_max] of length 4
         let coords: [number, number, number, number] = [0, 0, 0, 0];
         if (Array.isArray(b.boxNormalized) && b.boxNormalized.length === 4) {
           coords = [
@@ -85,12 +89,8 @@ Output the result matching the JSON schema.`;
         };
       });
 
-      return blocks;
-    });
-
-    const results = await Promise.all(pagePromises);
-    // Flatten array of arrays
-    const allAnswerBlocks = results.flat();
+      allAnswerBlocks.push(...blocks);
+    }
 
     return NextResponse.json({ answerBlocks: allAnswerBlocks });
   } catch (error) {

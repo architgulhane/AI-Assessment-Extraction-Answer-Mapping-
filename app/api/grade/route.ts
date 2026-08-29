@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { Question, AnswerBlock, MappedResult, GradedResult } from "@/lib/types";
-import { genAI } from "@/lib/gemini";
+import { getGeminiModel, generateContentWithRetry } from "@/lib/gemini";
 import { SchemaType } from "@google/generative-ai";
 
 export async function POST(request: Request) {
@@ -18,20 +18,25 @@ export async function POST(request: Request) {
       );
     }
 
-    const gradingPromises = questions.map(async (question) => {
+    const gradedResults: GradedResult[] = [];
+
+    // Process grading with pacing to avoid hitting rate limits
+    for (let i = 0; i < questions.length; i++) {
+      const question = questions[i];
+
       // Find the mapped result for this question
       const mapped = mappedResults.find((m) => m.questionId === question.id);
-      
       const maxMarks = question.maxMarks || 5;
 
       // Rule: Unanswered questions skip the API call entirely
       if (!mapped || !mapped.answerBlockIds || mapped.answerBlockIds.length === 0) {
-        return {
+        gradedResults.push({
           questionId: question.id,
           score: 0,
           maxMarks,
           feedback: "Not answered.",
-        } as GradedResult;
+        });
+        continue;
       }
 
       // Collect and concatenate all transcribed text from mapped blocks
@@ -41,35 +46,38 @@ export async function POST(request: Request) {
       }).filter(text => text.trim() !== "");
 
       if (transcribedTexts.length === 0) {
-        return {
+        gradedResults.push({
           questionId: question.id,
           score: 0,
           maxMarks,
           feedback: "Not answered.",
-        } as GradedResult;
+        });
+        continue;
+      }
+
+      // Small pacing delay between LLM calls
+      if (gradedResults.length > 0) {
+        await new Promise((resolve) => setTimeout(resolve, 300));
       }
 
       const combinedAnswerText = transcribedTexts.join("\n\n");
 
       // Text-only call for grading (no image)
-      const model = genAI.getGenerativeModel({
-        model: "gemini-2.5-flash",
-        generationConfig: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: SchemaType.OBJECT,
-            properties: {
-              score: {
-                type: SchemaType.NUMBER,
-                description: `A numeric score out of ${maxMarks}. You can award decimals or integers. Award partial credit for incomplete or partially correct reasoning.`,
-              },
-              feedback: {
-                type: SchemaType.STRING,
-                description: "A concise feedback of 1-2 sentences explaining the points awarded and what was correct/incorrect.",
-              },
+      const model = getGeminiModel({
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: SchemaType.OBJECT,
+          properties: {
+            score: {
+              type: SchemaType.NUMBER,
+              description: `A numeric score out of ${maxMarks}. You can award decimals or integers. Award partial credit for incomplete or partially correct reasoning.`,
             },
-            required: ["score", "feedback"],
+            feedback: {
+              type: SchemaType.STRING,
+              description: "A concise feedback of 1-2 sentences explaining the points awarded and what was correct/incorrect.",
+            },
           },
+          required: ["score", "feedback"],
         },
       });
 
@@ -89,34 +97,31 @@ Instructions:
 Output response matching the JSON schema.`;
 
       try {
-        const result = await model.generateContent(prompt);
+        const result = await generateContentWithRetry(model, prompt);
         const textResponse = result.response.text();
         const parsed = JSON.parse(textResponse);
 
-        // Capping score to maxMarks and floor to 0
         let finalScore = Number(parsed.score);
         if (isNaN(finalScore)) finalScore = 0;
         finalScore = Math.max(0, Math.min(maxMarks, finalScore));
         finalScore = Math.round(finalScore * 10) / 10;
 
-        return {
+        gradedResults.push({
           questionId: question.id,
           score: finalScore,
           maxMarks,
           feedback: parsed.feedback || "Answer evaluated.",
-        } as GradedResult;
+        });
       } catch (err) {
         console.error(`Error grading question ${question.id}:`, err);
-        return {
+        gradedResults.push({
           questionId: question.id,
           score: 0,
           maxMarks,
           feedback: `AI grading encountered an issue: ${err instanceof Error ? err.message : "safety block or parse failure"}.`,
-        } as GradedResult;
+        });
       }
-    });
-
-    const gradedResults = await Promise.all(gradingPromises);
+    }
 
     return NextResponse.json({ gradedResults });
   } catch (error) {

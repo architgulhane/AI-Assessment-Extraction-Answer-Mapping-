@@ -1,14 +1,17 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import {
+  GoogleGenerativeAI,
+  GenerativeModel,
+  GenerationConfig,
+  GenerateContentResult,
+} from "@google/generative-ai";
 
 const apiKey = process.env.GEMINI_API_KEY || "";
 
 export const genAI = new GoogleGenerativeAI(apiKey);
 
-// Helper to convert data URL base64 to Gemini inlineData format
 export function base64ToGenerativePart(base64DataUrl: string) {
   const match = base64DataUrl.match(/^data:(image\/[a-z]+);base64,(.+)$/);
   if (!match) {
-    // If not a data URL but a raw base64 string, default to image/jpeg
     return {
       inlineData: {
         data: base64DataUrl,
@@ -22,4 +25,48 @@ export function base64ToGenerativePart(base64DataUrl: string) {
       mimeType: match[1],
     },
   };
+}
+
+export function getGeminiModel(generationConfig?: GenerationConfig): GenerativeModel {
+  const modelName = process.env.GEMINI_MODEL_NAME || "gemini-1.5-flash";
+  return genAI.getGenerativeModel({
+    model: modelName,
+    generationConfig,
+  });
+}
+
+export async function generateContentWithRetry(
+  model: GenerativeModel,
+  contents: Parameters<GenerativeModel["generateContent"]>[0],
+  maxRetries = 3
+): Promise<GenerateContentResult> {
+  let attempt = 0;
+  while (attempt <= maxRetries) {
+    try {
+      return await model.generateContent(contents);
+    } catch (error: unknown) {
+      const err = error as { message?: string; status?: number };
+      const errorMsg = err?.message || "";
+      const status = err?.status;
+
+      const isRateLimit =
+        status === 429 ||
+        errorMsg.includes("429") ||
+        errorMsg.includes("Too Many Requests") ||
+        errorMsg.includes("QuotaFailure") ||
+        errorMsg.includes("RESOURCE_EXHAUSTED");
+
+      if (isRateLimit && attempt < maxRetries) {
+        attempt++;
+        const backoffMs = Math.pow(2, attempt) * 1500;
+        console.warn(
+          `[Gemini API 429 Rate Limit] Retrying attempt ${attempt}/${maxRetries} after ${backoffMs}ms delay...`
+        );
+        await new Promise((resolve) => setTimeout(resolve, backoffMs));
+      } else {
+        throw error;
+      }
+    }
+  }
+  throw new Error("Failed to generate content after maximum retries.");
 }

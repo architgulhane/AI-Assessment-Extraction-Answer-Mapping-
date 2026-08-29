@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { genAI, base64ToGenerativePart } from "@/lib/gemini";
+import { getGeminiModel, base64ToGenerativePart, generateContentWithRetry } from "@/lib/gemini";
 import { SchemaType } from "@google/generative-ai";
 
 export async function POST(request: Request) {
@@ -13,45 +13,42 @@ export async function POST(request: Request) {
     const imageParts = images.map((img) => base64ToGenerativePart(img));
 
     // Get the model with responseSchema config
-    const model = genAI.getGenerativeModel({
-      model: "gemini-2.5-flash",
-      generationConfig: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: SchemaType.OBJECT,
-          properties: {
-            questions: {
-              type: SchemaType.ARRAY,
-              items: {
-                type: SchemaType.OBJECT,
-                properties: {
-                  id: {
-                    type: SchemaType.STRING,
-                    description: "Unique string id for the question, e.g. 'q1', 'q11a', 'q11b'. Ensure it is lowercase, starts with 'q', and combines number + subPart.",
-                  },
-                  number: {
-                    type: SchemaType.STRING,
-                    description: "The printed number of the question, e.g., '1', '11'.",
-                  },
-                  subPart: {
-                    type: SchemaType.STRING,
-                    description: "The printed sub-part letter if present, e.g., 'a', 'b', 'c'. Omit if none.",
-                  },
-                  text: {
-                    type: SchemaType.STRING,
-                    description: "The transcribed question text in full.",
-                  },
-                  maxMarks: {
-                    type: SchemaType.NUMBER,
-                    description: "The maximum marks or points allocated to this question (usually in brackets at the end of the question). Omit or set to 5 if not visible.",
-                  },
+    const model = getGeminiModel({
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: SchemaType.OBJECT,
+        properties: {
+          questions: {
+            type: SchemaType.ARRAY,
+            items: {
+              type: SchemaType.OBJECT,
+              properties: {
+                id: {
+                  type: SchemaType.STRING,
+                  description: "Unique string id for the question, e.g. 'q1', 'q11a', 'q11b'. Ensure it is lowercase, starts with 'q', and combines number + subPart.",
                 },
-                required: ["id", "number", "text"],
+                number: {
+                  type: SchemaType.STRING,
+                  description: "The printed number of the question, e.g., '1', '11'.",
+                },
+                subPart: {
+                  type: SchemaType.STRING,
+                  description: "The printed sub-part letter if present, e.g., 'a', 'b', 'c'. Omit if none.",
+                },
+                text: {
+                  type: SchemaType.STRING,
+                  description: "The transcribed question text in full.",
+                },
+                maxMarks: {
+                  type: SchemaType.NUMBER,
+                  description: "The maximum marks or points allocated to this question (usually in brackets at the end of the question). Omit or set to 5 if not visible.",
+                },
               },
+              required: ["id", "number", "text"],
             },
           },
-          required: ["questions"],
         },
+        required: ["questions"],
       },
     });
 
@@ -62,7 +59,7 @@ Rules:
 3. Extract maximum marks/points if printed next to the question. If marks are not visible, default to 5.
 4. Output the results strictly formatted as JSON according to the schema.`;
 
-    const result = await model.generateContent([prompt, ...imageParts]);
+    const result = await generateContentWithRetry(model, [prompt, ...imageParts]);
     const textResponse = result.response.text();
     
     // Parse response
