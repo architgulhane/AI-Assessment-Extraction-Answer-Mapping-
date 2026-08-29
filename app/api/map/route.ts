@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { Question, AnswerBlock, MappedResult } from "@/lib/types";
 import { getEmbeddings, cosineSimilarity } from "@/lib/embeddings";
 
-// Helper to normalize labels for explicit matching (e.g. "Q11(a)" -> "11a", "q2" -> "2")
+// Helper to normalize labels for explicit matching (e.g. "Q11(a)" -> "11a", "q2" -> "2", "26." -> "26")
 function normalizeLabel(label: string): string {
   let clean = label.toLowerCase().replace(/[^a-z0-9]/g, "");
   if (clean.startsWith("question")) {
@@ -16,21 +16,21 @@ function normalizeLabel(label: string): string {
 
 // Substring/token overlap helper to fall back to if Hugging Face API is down or rate-limited
 function getSimpleTextSimilarity(text1: string, text2: string): number {
-  const words1 = new Set(text1.toLowerCase().split(/\s+/).filter(w => w.length > 2));
-  const words2 = new Set(text2.toLowerCase().split(/\s+/).filter(w => w.length > 2));
+  const words1 = new Set(text1.toLowerCase().split(/\s+/).filter((w) => w.length > 2));
+  const words2 = new Set(text2.toLowerCase().split(/\s+/).filter((w) => w.length > 2));
   if (words1.size === 0 || words2.size === 0) return 0;
-  
+
   let intersection = 0;
-  words1.forEach(w => {
+  words1.forEach((w) => {
     if (words2.has(w)) intersection++;
   });
-  
+
   return intersection / Math.max(words1.size, words2.size);
 }
 
 export async function POST(request: Request) {
   try {
-    const { questions, answerBlocks } = await request.json() as {
+    const { questions, answerBlocks } = (await request.json()) as {
       questions: Question[];
       answerBlocks: AnswerBlock[];
     };
@@ -43,27 +43,39 @@ export async function POST(request: Request) {
     const matchedBlockIds = new Set<string>();
 
     // Step 1: Explicit Label Matching
-    // Map answer blocks that have a label like "Q1" or "11a" directly to matching questions
     const questionNormalMap = new Map<string, Question>();
-    questions.forEach(q => {
-      // e.g. "q11a" -> "11a"
-      const normQ = normalizeLabel(q.id);
-      questionNormalMap.set(normQ, q);
+    questions.forEach((q) => {
+      const normId = normalizeLabel(q.id);
+      const normNum = normalizeLabel(q.number + (q.subPart || ""));
+      questionNormalMap.set(normId, q);
+      questionNormalMap.set(normNum, q);
+      questionNormalMap.set(normalizeLabel(q.number), q);
     });
 
-    // Group explicit matches by question ID
-    const explicitMappings = new Map<string, string[]>(); // questionId -> answerBlockIds[]
+    const explicitMappings = new Map<string, string[]>();
 
-    answerBlocks.forEach(block => {
-      if (block.detectedQuestionLabel && block.detectedQuestionLabel.trim() !== "") {
-        const normLabel = normalizeLabel(block.detectedQuestionLabel);
-        // Find if any question normalizes to this label
+    answerBlocks.forEach((block) => {
+      let label = block.detectedQuestionLabel;
+      
+      // Fallback: If detectedQuestionLabel is empty, try parsing leading number from transcribedText (e.g. "26. Distinguish...")
+      if (!label || label.trim() === "") {
+        const leadingMatch = block.transcribedText.match(/^(?:Q|Question\s*)?(\d+[a-z]?)\b[\.\):]?/i);
+        if (leadingMatch) {
+          label = leadingMatch[1];
+        }
+      }
+
+      if (label && label.trim() !== "") {
+        const normLabel = normalizeLabel(label);
         let matchedQuestion = questionNormalMap.get(normLabel);
-        
-        // If not found, try to match by number directly (e.g. label "11" matches question "11a" if no other fits,
-        // or matches "11" if exact)
+
         if (!matchedQuestion) {
-          matchedQuestion = questions.find(q => normalizeLabel(q.number) === normLabel);
+          matchedQuestion = questions.find(
+            (q) =>
+              normalizeLabel(q.number) === normLabel ||
+              normalizeLabel(q.id) === normLabel ||
+              normalizeLabel(q.number + (q.subPart || "")) === normLabel
+          );
         }
 
         if (matchedQuestion) {
@@ -75,7 +87,6 @@ export async function POST(request: Request) {
       }
     });
 
-    // Write explicit matches to final results
     explicitMappings.forEach((blockIds, questionId) => {
       mappedResults.push({
         questionId,
@@ -84,13 +95,14 @@ export async function POST(request: Request) {
       });
     });
 
-    // Step 2: Embedding Fallback Matching for unmatched answer blocks
-    const unmatchedBlocks = answerBlocks.filter(b => !matchedBlockIds.has(b.id));
-    const unmatchedQuestions = questions.filter(q => !mappedResults.some(m => m.questionId === q.id));
+    // Step 2: Embedding / Similarity Fallback Matching
+    const unmatchedBlocks = answerBlocks.filter((b) => !matchedBlockIds.has(b.id));
+    const unmatchedQuestions = questions.filter(
+      (q) => !mappedResults.some((m) => m.questionId === q.id)
+    );
 
     if (unmatchedBlocks.length > 0 && unmatchedQuestions.length > 0) {
       try {
-        // Fetch embeddings for unmatched questions (E5 query prefix)
         const questionEmbeddings = await Promise.all(
           unmatchedQuestions.map(async (q) => {
             const vector = await getEmbeddings(`query: ${q.text}`);
@@ -98,7 +110,6 @@ export async function POST(request: Request) {
           })
         );
 
-        // Fetch embeddings for unmatched blocks (E5 passage prefix)
         const blockEmbeddings = await Promise.all(
           unmatchedBlocks.map(async (b) => {
             const vector = await getEmbeddings(`passage: ${b.transcribedText}`);
@@ -106,12 +117,11 @@ export async function POST(request: Request) {
           })
         );
 
-        // Map unmatched blocks to their highest similarity unmatched question (brute-force cosine similarity)
-        blockEmbeddings.forEach(be => {
+        blockEmbeddings.forEach((be) => {
           let bestQuestionId = "";
           let bestScore = -1;
 
-          questionEmbeddings.forEach(qe => {
+          questionEmbeddings.forEach((qe) => {
             const score = cosineSimilarity(be.vector, qe.vector);
             if (score > bestScore) {
               bestScore = score;
@@ -119,8 +129,7 @@ export async function POST(request: Request) {
             }
           });
 
-          // Match only if similarity satisfies the 0.5 threshold
-          if (bestScore >= 0.5 && bestQuestionId) {
+          if (bestScore >= 0.4 && bestQuestionId) {
             mappedResults.push({
               questionId: bestQuestionId,
               answerBlockIds: [be.blockId],
@@ -131,14 +140,13 @@ export async function POST(request: Request) {
           }
         });
       } catch (embError) {
-        // ASSUMPTION: Fall back to substring / token overlap similarity heuristic if Hugging Face API fails or is rate-limited
         console.warn("Hugging Face Embedding API failed, falling back to substring overlap heuristic.", embError);
-        
-        unmatchedBlocks.forEach(b => {
+
+        unmatchedBlocks.forEach((b) => {
           let bestQuestionId = "";
           let bestScore = -1;
 
-          unmatchedQuestions.forEach(q => {
+          unmatchedQuestions.forEach((q) => {
             const score = getSimpleTextSimilarity(q.text, b.transcribedText);
             if (score > bestScore) {
               bestScore = score;
@@ -146,7 +154,7 @@ export async function POST(request: Request) {
             }
           });
 
-          if (bestScore >= 0.3 && bestQuestionId) {
+          if (bestScore >= 0.25 && bestQuestionId) {
             mappedResults.push({
               questionId: bestQuestionId,
               answerBlockIds: [b.id],
@@ -160,9 +168,8 @@ export async function POST(request: Request) {
     }
 
     // Step 3: Handle Unanswered Questions
-    // Any question with zero matched blocks after both passes must be present in the results with an empty answerBlockIds array
-    questions.forEach(q => {
-      const isMapped = mappedResults.some(r => r.questionId === q.id);
+    questions.forEach((q) => {
+      const isMapped = mappedResults.some((r) => r.questionId === q.id);
       if (!isMapped) {
         mappedResults.push({
           questionId: q.id,
@@ -172,51 +179,7 @@ export async function POST(request: Request) {
       }
     });
 
-    // Step 4: Group multi-page / multi-block answers
-    // In case multiple blocks mapped to the same question (can happen if multiple explicit labels exist, or fallback matched them),
-    // group them under a single MappedResult and sort by pageIndex / block coordinate order.
-    const groupedMap = new Map<string, MappedResult>();
-    mappedResults.forEach(r => {
-      const existing = groupedMap.get(r.questionId);
-      if (existing) {
-        // Combine answerBlockIds and remove duplicates
-        existing.answerBlockIds = Array.from(new Set([...existing.answerBlockIds, ...r.answerBlockIds]));
-        // Keep the best matchMethod
-        if (existing.matchMethod === "unmatched") {
-          existing.matchMethod = r.matchMethod;
-          existing.matchConfidence = r.matchConfidence;
-        }
-      } else {
-        groupedMap.set(r.questionId, r);
-      }
-    });
-
-    const finalMappedResults = Array.from(groupedMap.values());
-
-    // Sort answer blocks inside each mapped result in page order, then by vertical coordinate (y_min)
-    finalMappedResults.forEach(r => {
-      if (r.answerBlockIds.length > 1) {
-        r.answerBlockIds.sort((id1, id2) => {
-          const b1 = answerBlocks.find(b => b.id === id1);
-          const b2 = answerBlocks.find(b => b.id === id2);
-          if (!b1 || !b2) return 0;
-          if (b1.pageIndex !== b2.pageIndex) {
-            return b1.pageIndex - b2.pageIndex;
-          }
-          return b1.boxNormalized[0] - b2.boxNormalized[0]; // sort by y_min
-        });
-      }
-    });
-
-    // Extract completely unmatched blocks (for informational layout rendering)
-    const unmatchedAnswerBlockIds = answerBlocks
-      .filter(b => !matchedBlockIds.has(b.id))
-      .map(b => b.id);
-
-    return NextResponse.json({
-      mappedResults: finalMappedResults,
-      unmatchedAnswerBlockIds,
-    });
+    return NextResponse.json({ mappedResults });
   } catch (error) {
     console.error("Error in map API:", error);
     const errMsg = error instanceof Error ? error.message : "Internal Server Error";
