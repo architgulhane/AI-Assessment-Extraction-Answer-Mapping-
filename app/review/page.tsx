@@ -40,7 +40,7 @@ export default function ReviewPage() {
 
   const [selectedQuestionId, setSelectedQuestionId] = useState<string | null>(null);
   const [currentPageIndex, setCurrentPageIndex] = useState(0);
-  const [zoomLevel, setZoomLevel] = useState(100);
+  const [zoomLevel, setZoomLevel] = useState(50);
   const [expandedFeedbackIds, setExpandedFeedbackIds] = useState<Set<string>>(new Set());
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(true); // Default to collapsed in review!
   const [editingScoreQId, setEditingScoreQId] = useState<string | null>(null);
