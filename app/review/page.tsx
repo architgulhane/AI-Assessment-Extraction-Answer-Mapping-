@@ -18,6 +18,7 @@ import {
   Info,
   Pencil,
   Check,
+  RefreshCw,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 
@@ -688,6 +689,7 @@ export default function ReviewPage() {
 
                     const isUnmatched = unmatchedBlockIds.includes(block.id);
                     const isSelected = selectedQuestionBlocks.includes(block.id);
+                    const isRemapActive = activeRemapBlockId === block.id;
 
                     const blockMapping = mappedResults.find((m) =>
                       m.answerBlockIds && m.answerBlockIds.includes(block.id)
@@ -707,7 +709,7 @@ export default function ReviewPage() {
                     const isZero = matchedQ && grading && score === 0;
 
                     let outcomeBorderColor = "border-slate-400";
-                    let outcomeBgColor = "bg-slate-500/5";
+                    let outcomeBgColor = "bg-slate-500/10";
                     let labelBgColor = "bg-slate-600";
                     let questionLabelText = "Unmatched";
 
@@ -715,28 +717,37 @@ export default function ReviewPage() {
                       questionLabelText = `Q${matchedQ.number}${matchedQ.subPart ? matchedQ.subPart : ""}`;
                       if (isFull) {
                         outcomeBorderColor = "border-emerald-500";
-                        outcomeBgColor = isSelected ? "bg-emerald-500/20" : "bg-emerald-500/10";
+                        outcomeBgColor = "bg-emerald-500/10";
                         labelBgColor = "bg-emerald-600";
                       } else if (isPartial) {
                         outcomeBorderColor = "border-amber-500";
-                        outcomeBgColor = isSelected ? "bg-amber-500/20" : "bg-amber-500/10";
-                        labelBgColor = "bg-amber-600";
+                        outcomeBgColor = "bg-amber-500/10";
+                        labelBgColor = "bg-amber-500";
                       } else if (isZero) {
                         outcomeBorderColor = "border-rose-500";
-                        outcomeBgColor = isSelected ? "bg-rose-500/20" : "bg-rose-500/10";
+                        outcomeBgColor = "bg-rose-500/10";
                         labelBgColor = "bg-rose-600";
                       } else {
                         outcomeBorderColor = "border-emerald-500";
-                        outcomeBgColor = isSelected ? "bg-emerald-500/20" : "bg-emerald-500/10";
+                        outcomeBgColor = "bg-emerald-500/10";
                         labelBgColor = "bg-emerald-600";
                       }
                     }
 
-                    const selectionClass = isSelected
-                      ? "ring-4 ring-orange-500/60 shadow-lg z-30 scale-[1.005]"
-                      : "z-10 hover:z-20 hover:ring-2 hover:ring-slate-300";
+                    // Item 2: Selected state uses Orange exclusively
+                    if (isSelected) {
+                      labelBgColor = "bg-orange-500";
+                    }
 
-                    const overlayClass = `border-2 ${borderStyle} ${outcomeBorderColor} ${outcomeBgColor} ${selectionClass} cursor-pointer`;
+                    // Item 3: Resting vs Active (Hovered or Selected) box styling
+                    let overlayClass = "";
+                    if (isSelected) {
+                      overlayClass = `border-2 ${borderStyle} border-orange-500 bg-orange-500/15 ring-4 ring-orange-500/50 shadow-md z-30 scale-[1.005] opacity-100 cursor-pointer`;
+                    } else if (isRemapActive) {
+                      overlayClass = `border-2 ${borderStyle} ${outcomeBorderColor} ${outcomeBgColor} z-30 opacity-100 shadow-md cursor-pointer`;
+                    } else {
+                      overlayClass = `border ${borderStyle} ${outcomeBorderColor} opacity-40 bg-transparent hover:opacity-100 hover:border-2 hover:${outcomeBgColor} z-10 hover:z-20 transition-all duration-150 cursor-pointer`;
+                    }
 
                     return (
                       <div
@@ -754,26 +765,29 @@ export default function ReviewPage() {
                           }
                         }}
                       >
-                        {/* Anchor Question Label Box on Top-Left Corner of its own Bounding Box */}
-                        <div className={`absolute top-1 left-1 px-1.5 py-0.5 rounded text-[9px] font-bold text-white whitespace-nowrap shadow-xs z-30 select-none flex items-center gap-1.5 ${labelBgColor}`}>
+                        {/* Item 4: Question Label Tag sits just outside/above top border (-top-3.5) */}
+                        <div className={`absolute -top-3.5 left-1 px-1.5 py-0.5 rounded text-[9px] font-bold text-white whitespace-nowrap shadow-xs z-30 select-none flex items-center gap-1 transition-all ${labelBgColor}`}>
                           <span>{questionLabelText}</span>
+                          {/* Item 1: Hover/selected-only small icon-only button (no persistent text badge) */}
                           <button
                             type="button"
                             onClick={(e) => {
                               e.stopPropagation();
                               setActiveRemapBlockId(activeRemapBlockId === block.id ? null : block.id);
                             }}
-                            title="Reassign block to a question"
-                            className="bg-black/25 hover:bg-black/40 text-[8px] font-bold px-1 py-0.2 rounded transition-colors"
+                            title="Reassign answer block"
+                            className={`p-0.5 rounded hover:bg-black/30 transition-opacity ${
+                              isSelected || isRemapActive ? "flex opacity-100" : "hidden group-hover/box:flex"
+                            }`}
                           >
-                            Re-map
+                            <RefreshCw className="w-2.5 h-2.5" />
                           </button>
                         </div>
 
                         {/* Floating Re-map Popover */}
                         {activeRemapBlockId === block.id && (
                           <div
-                            className="absolute top-7 left-1 bg-white rounded-xl shadow-2xl border border-slate-200 p-2.5 z-50 min-w-[240px] max-w-[280px] text-slate-800 animate-in fade-in zoom-in-95 cursor-default"
+                            className="absolute top-2 left-1 bg-white rounded-xl shadow-2xl border border-slate-200 p-2.5 z-50 min-w-[240px] max-w-[280px] text-slate-800 animate-in fade-in zoom-in-95 cursor-default"
                             onClick={(e) => e.stopPropagation()}
                           >
                             <div className="flex items-center justify-between pb-1.5 mb-1.5 border-b border-slate-100">
