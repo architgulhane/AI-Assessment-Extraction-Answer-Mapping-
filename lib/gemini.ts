@@ -35,8 +35,27 @@ export function base64ToGenerativePart(base64DataUrl: string) {
   };
 }
 
-// In-memory cache for available models list
-let cachedAvailableModels: string[] | null = null;
+// Global singleton definitions to ensure process-lifetime persistence in Next.js server context
+declare global {
+  // eslint-disable-next-line no-var
+  var __gemini_discovery_promise__: Promise<string[]> | undefined;
+  // eslint-disable-next-line no-var
+  var __gemini_discovery_count__: number | undefined;
+  // eslint-disable-next-line no-var
+  var __gemini_hard_failed_models__: Set<string> | undefined;
+  // eslint-disable-next-line no-var
+  var __gemini_quota_cooldowns__: Map<string, number> | undefined;
+}
+
+if (!globalThis.__gemini_discovery_count__) {
+  globalThis.__gemini_discovery_count__ = 0;
+}
+if (!globalThis.__gemini_hard_failed_models__) {
+  globalThis.__gemini_hard_failed_models__ = new Set<string>();
+}
+if (!globalThis.__gemini_quota_cooldowns__) {
+  globalThis.__gemini_quota_cooldowns__ = new Map<string, number>();
+}
 
 // Permanently blacklisted dead models that return 404s despite appearing in list-models responses
 const HARDCODED_DEAD_MODELS = new Set([
@@ -51,9 +70,6 @@ const PREFERRED_MODEL_ORDER = [
   "gemini-3.1-flash-lite",
 ];
 
-// Runtime memory tracking for failures across API requests
-const runtimeHardFailedModels = new Set<string>();
-const runtimeQuotaCooldowns = new Map<string, number>();
 const QUOTA_COOLDOWN_MS = 3 * 60 * 1000; // 3 minute cooldown for 429 quota errors
 
 // Static fallback list if REST/SDK discovery endpoint is unavailable
@@ -66,22 +82,23 @@ const STATIC_FALLBACK_MODELS = [
 ];
 
 export function sortAndFilterCandidateModels(discovered: string[]): string[] {
+  const hardFailed = globalThis.__gemini_hard_failed_models__ || new Set();
   const validDiscovered = discovered.filter(
-    (m) => !HARDCODED_DEAD_MODELS.has(m) && !runtimeHardFailedModels.has(m)
+    (m) => !HARDCODED_DEAD_MODELS.has(m) && !hardFailed.has(m)
   );
 
   const ordered: string[] = [];
 
-  // First add preferred models in exact specified order if not hard-failed
+  // 1. Add preferred models in exact specified order if not dead/hard-failed
   for (const preferred of PREFERRED_MODEL_ORDER) {
-    if (!HARDCODED_DEAD_MODELS.has(preferred) && !runtimeHardFailedModels.has(preferred)) {
+    if (!HARDCODED_DEAD_MODELS.has(preferred) && !hardFailed.has(preferred)) {
       if (!ordered.includes(preferred)) {
         ordered.push(preferred);
       }
     }
   }
 
-  // Then add remaining valid discovered models
+  // 2. Add remaining valid discovered models
   for (const model of validDiscovered) {
     if (!ordered.includes(model)) {
       ordered.push(model);
@@ -91,37 +108,39 @@ export function sortAndFilterCandidateModels(discovered: string[]): string[] {
   return ordered;
 }
 
-export async function getAvailableModels(): Promise<string[]> {
-  if (cachedAvailableModels && cachedAvailableModels.length > 0) {
-    return sortAndFilterCandidateModels(cachedAvailableModels);
-  }
+export function getAvailableModels(): Promise<string[]> {
+  // Guarantee discovery fetch happens AT MOST ONCE per server process lifetime
+  if (!globalThis.__gemini_discovery_promise__) {
+    globalThis.__gemini_discovery_promise__ = (async () => {
 
-  try {
-    // Dynamic discovery via REST endpoint GET /v1beta/models
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
-    if (res.ok) {
-      const data = await res.json();
-      if (Array.isArray(data.models)) {
-        const discovered = data.models
-          .filter((m: { supportedGenerationMethods?: string[]; name?: string }) =>
-            m.supportedGenerationMethods?.includes("generateContent")
-          )
-          .map((m: { name: string }) => m.name.replace(/^models\//, ""));
+      try {
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data.models)) {
+            const discovered = data.models
+              .filter((m: { supportedGenerationMethods?: string[]; name?: string }) =>
+                m.supportedGenerationMethods?.includes("generateContent")
+              )
+              .map((m: { name: string }) => m.name.replace(/^models\//, ""));
 
-        if (discovered.length > 0) {
-          cachedAvailableModels = discovered;
-          const filtered = sortAndFilterCandidateModels(discovered);
-          console.log("[Gemini API] Dynamically discovered available models (filtered):", filtered);
-          return filtered;
+            if (discovered.length > 0) {
+              console.log("[Gemini API] Dynamically discovered available models list from API.");
+              return discovered;
+            }
+          }
         }
+      } catch (err) {
+        console.warn("[Gemini API Warning] Live model discovery fetch failed, using static fallback models list.", err);
       }
-    }
-  } catch (err) {
-    console.warn("[Gemini API Warning] Live model discovery failed, using static fallback models list.", err);
+
+      return STATIC_FALLBACK_MODELS;
+    })();
   }
 
-  cachedAvailableModels = STATIC_FALLBACK_MODELS;
-  return sortAndFilterCandidateModels(STATIC_FALLBACK_MODELS);
+  return globalThis.__gemini_discovery_promise__.then((discovered) =>
+    sortAndFilterCandidateModels(discovered)
+  );
 }
 
 export async function getGeminiModel(generationConfig?: GenerationConfig): Promise<GenerativeModel> {
@@ -163,20 +182,22 @@ export async function generateContentWithRetry(
 
   const candidateModels = await getAvailableModels();
   const now = Date.now();
+  const hardFailed = globalThis.__gemini_hard_failed_models__ || new Set();
+  const cooldowns = globalThis.__gemini_quota_cooldowns__ || new Map();
   let lastError: unknown = null;
 
   for (let mIdx = 0; mIdx < candidateModels.length; mIdx++) {
     const modelName = candidateModels[mIdx];
 
     // Check permanently hard-failed models
-    if (HARDCODED_DEAD_MODELS.has(modelName) || runtimeHardFailedModels.has(modelName)) {
+    if (HARDCODED_DEAD_MODELS.has(modelName) || hardFailed.has(modelName)) {
       continue;
     }
 
-    // Check active quota cooldowns
-    const cooldownUntil = runtimeQuotaCooldowns.get(modelName);
+    // Check active 429 quota cooldowns
+    const cooldownUntil = cooldowns.get(modelName);
     if (cooldownUntil && now < cooldownUntil) {
-      // Model is in active quota cooldown, skip to next candidate immediately
+      // Model is in active quota cooldown window, skip immediately
       continue;
     }
 
@@ -197,7 +218,7 @@ export async function generateContentWithRetry(
       const isNotFound = status === 404 || errorMsg.includes("404") || errorMsg.includes("not found");
       if (isNotFound) {
         console.error(`[Gemini API Config Error] Model '${modelName}' not found or unsupported (404). Permanently blacklisting.`);
-        runtimeHardFailedModels.add(modelName);
+        globalThis.__gemini_hard_failed_models__?.add(modelName);
         continue;
       }
 
@@ -214,7 +235,7 @@ export async function generateContentWithRetry(
         }
       }
 
-      // 3. 429 Quota / Rate Limit check -> Log warning, set cooldown, and transition to next candidate model
+      // 3. 429 Quota / Rate Limit check -> Log warning, set 3-min cooldown, and transition to next candidate model
       const isQuotaError =
         status === 429 ||
         errorMsg.includes("429") ||
@@ -225,7 +246,7 @@ export async function generateContentWithRetry(
 
       if (isQuotaError) {
         console.warn(`[Gemini Quota Exhausted on ${modelName}] Setting 3-min cooldown and transitioning to next candidate model...`);
-        runtimeQuotaCooldowns.set(modelName, Date.now() + QUOTA_COOLDOWN_MS);
+        globalThis.__gemini_quota_cooldowns__?.set(modelName, Date.now() + QUOTA_COOLDOWN_MS);
         continue;
       }
 
