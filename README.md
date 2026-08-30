@@ -1,80 +1,63 @@
 # VedaAI — AI Assessment Extraction & Answer Mapping
 
-VedaAI is an intelligent assessment evaluation tool designed for educators. It enables uploading a printed question paper along with a student's handwritten answer sheet, automatically extracting questions, locating and transcribing answers, mapping answers to questions, providing interactive bounding box highlight overlays, and performing automatic AI-based grading and feedback.
+VedaAI is an intelligent assessment evaluation platform designed for educators. It automates the extraction of questions from printed question papers and maps them to handwritten answers on student sheets, featuring interactive region highlighting, automatic AI-based grading, and instant performance metrics.
+
+---
 
 ## 🔗 Project Links
 - **GitHub Repository**: [architgulhane/AI-Assessment-Extraction-Answer-Mapping-](https://github.com/architgulhane/AI-Assessment-Extraction-Answer-Mapping-)
-- **Live Deployed URL**: [https://veda-ai-assessment.vercel.app](https://veda-ai-assessment.vercel.app) *(Deployable to Vercel instantly by connecting the GitHub repository)*
+---
+
+## 📸 Product Showcases & Interface
+
+| 1. Homepage & File Upload | 2. Live Checkpoint Logs |
+| :---: | :---: |
+| <img src="https://github.com/user-attachments/assets/e2b975c2-ae48-4522-9ab6-17f3dc9936ae" width="450" alt="VedaAI Ingestion Screen" /> | <img src="https://github.com/user-attachments/assets/f3bf016f-1fd8-4d76-a572-415fce37944d" width="450" alt="Live Checkpoint Logs" /> |
+| *Sleek ingestion workspace for uploading printed exams and handwritten answer sheets.* | *Real-time progress logging tracking every step of the processing pipeline.* |
+
+| 3. Assessment Overview Dashboard | 4. Coordinate Bounding Box Overlay |
+| :---: | :---: |
+| <img src="https://github.com/user-attachments/assets/ca9e27fb-c024-4794-b413-0a7885779c27" width="450" alt="Assessment Review Screen" /> | <img src="https://github.com/user-attachments/assets/6e34bb16-2041-4215-8230-b6423084cd41" width="450" alt="Bounding Box Overlay Detail" /> |
+| *Split-view review workspace with dynamic grading summaries and question filtering.* | *High-fidelity answer highlighting overlays with score-outcome color indicators.* |
 
 ---
 
-## 🛠️ Architecture & Technical Approach
+## ⚡ Key Features & USPs (Unique Selling Points)
 
-VedaAI is built as a single-session, in-memory, serverless web application using a modern tech stack:
-
-1. **Framework**: Next.js 14 (App Router) with TypeScript.
-2. **Styling**: Tailwind CSS for a high-fidelity SaaS dashboard (Figma replication).
-3. **PDF Page Splitting**: `pdfjs-dist` is used on the client-side to render PDF pages into images. This offloads PDF processing from the serverless functions (improving speed and memory footprint) and converts documents into standard JPEG format directly.
-4. **Question Extraction**: Done using **Gemini 2.5 Flash** with a structured output schema (`responseSchema`) to enforce type-safety on the parsed questions in printed order.
-5. **Answer block OCR & Bounding Boxes**: Evaluated page-by-page in parallel using **Gemini 2.5 Flash**. The VLM identifies handwritten answer blocks, outputs their normalized coordinate boxes (`[y_min, x_min, y_max, x_max]` on a 0-1000 scale), and transcribes the handwritten text.
-6. **Mapping Engine**:
-   - **Pass 1 (Explicit Label Matching)**: Maps blocks with written identifiers (e.g. "Q1", "2.") directly to matching question numbers.
-   - **Pass 2 (Embedding Fallback)**: For unlabeled blocks, maps them using cosine similarity computed in-memory between E5 query embeddings of questions and E5 passage embeddings of answer transcriptions.
-   - **Fallback Heuristic**: Token-overlap search is used if the Hugging Face API hits rate limits or is down.
-7. **Grading & Feedback**: Executed in parallel using a **text-only Gemini 2.5 Flash** call per mapped question to evaluate answers out of their max marks, support partial credit, and write brief constructive feedback. Unanswered questions skip the API call entirely (defaulting to a score of 0 and "Not answered" feedback) to optimize latency and api usage.
-8. **Storage**: Completely in-memory using React Context (`lib/context.tsx`) — no database, vector store, or persistent storage is required by design.
+- **Multimodal Printed Question Parser**: Decomposes printed exams, automatically parsing parent questions and sub-parts (e.g. `11 (a)` and `11 (b)`) in order, while retaining original numbering.
+- **Handwritten Region Detection**: Detects, bounds, and transcribes handwritten responses directly from student sheets, mapping normalized coordinates onto the canvas viewer.
+- **3-Pass Hybrid Mapping Engine**:
+  - **Pass 1 (Explicit Label Matching)**: Resolves written student markers (e.g. *"Ans 3b"*) using fuzzy string expressions.
+  - **Pass 2 (Semantic Embedding Match)**: Employs dense vector cosine similarity for unlabeled response mappings.
+  - **Pass 3 (Token Overlap Fallback)**: Jaccard keyword overlap index for unmatched edge blocks.
+- **Batched AI Grading & Insights**: Evaluates answers out of question-specific marks, provides partial credit scoring, and writes constructive feedback.
+- **Honest Fallback & Review UI**: Excludes rate-limited/failed AI grading calls from total scores (showing them as `Pending AI` / `—`) to prevent misleading zeros, allowing direct manual score override with one click.
+- **Process-Lifetime Caching**: Ensures heavy model discovery network fetches fire at most once per server process lifetime, preventing API route overhead.
 
 ---
 
-## 🤖 AI Models & APIs Used
+## 🗺️ Architectural Mapping & Grading Pipeline
 
-- **OCR, Extraction, Bounding Boxes, & Grading**: Google Gemini 2.5 Flash via `GoogleGenerativeAI` SDK (`gemini-2.5-flash`).
-- **Semantic Text Embeddings**: `intfloat/e5-base-v2` via the Hugging Face Inference API.
-
----
-
-## ⚙️ Environment Variables
-
-Both variables must be configured in your Vercel project settings or `.env.local` file:
-
-```bash
-GEMINI_API_KEY=your-google-ai-studio-key
-HUGGINGFACE_API_KEY=your-huggingface-inference-token
-```
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/26ad5b67-893b-4a0c-b5b4-7d374ebf2cf9" width="900" alt="VedaAI Pipeline Architecture" />
+  <br />
+  <em>The complete 3-stage processing flow, 3-pass fallback mapping engine, and enterprise resilience safeguards of VedaAI.</em>
+</p>
 
 ---
 
-## 🚀 Getting Started (Local Development)
+## 🛠️ Tech Stack
 
-### 1. Clone the repository
-```bash
-git clone https://github.com/architgulhane/AI-Assessment-Extraction-Answer-Mapping-.git
-cd AI-Assessment-Extraction-Answer-Mapping-
-```
-
-### 2. Install dependencies
-```bash
-npm install
-```
-
-### 3. Add environment variables
-Create a `.env.local` file:
-```bash
-GEMINI_API_KEY=your_key
-HUGGINGFACE_API_KEY=your_key
-```
-
-### 4. Run the development server
-```bash
-npm run dev
-```
-Open [http://localhost:3000](http://localhost:3000) to view the application.
+- **Framework**: Next.js 14 App Router, TypeScript, React Context (for single-session in-memory state).
+- **Styling**: Tailwind CSS & Poppins typography.
+- **AI Core**: Google Gemini 3.5 Flash & Google Gemini Embedding API.
+- **PDF Core**: Client-side `pdfjs-dist` (converts PDFs to standard images in-browser).
 
 ---
 
 ## 💡 Assumptions & Limitations
 
 - **Single Student Evaluation**: Designed for evaluating a single student's answer sheet per session (no batch evaluation of multiple students).
-- **VLM-Based Bounding Boxes**: Bounding boxes are generated by Gemini Flash and represent loose handwritten regions, which are scaled dynamically using CSS percentage layouts.
+- **VLM-Based Bounding Boxes**: Bounding boxes are generated by Gemini Flash and represent handwritten regions, which are scaled dynamically using CSS percentage layouts.
 - **Grading Variations**: Grading is LLM-judged based on question text and transcribed answer text, which may vary slightly across runs.
 - **State Persistence**: State is maintained in-memory per session; refreshing the browser will wipe current data and redirect the user back to the upload screen.
