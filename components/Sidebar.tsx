@@ -51,15 +51,15 @@ export default function Sidebar({ isCollapsed = false, onToggleCollapse }: Sideb
       <div className={`px-4 py-4 border-b border-slate-100 ${isCollapsed ? "flex justify-center" : ""}`}>
         {isCollapsed ? (
           <button
-            className="w-10 h-10 rounded-full border border-orange-500 bg-zinc-800 text-white flex items-center justify-center shadow-md hover:bg-zinc-700 transition-colors"
+            className="w-10 h-10 rounded-full border-[3.5px] border-[#ff6746] bg-[#2c2c2c] text-white flex items-center justify-center shadow-sm hover:bg-[#383838] transition-colors"
             title="AI Teacher&apos;s Toolkit"
           >
-            <Sparkles className="w-4 h-4 text-orange-400" />
+            <Sparkles className="w-4 h-4 text-white fill-white" />
           </button>
         ) : (
-          <button className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-full border border-orange-500 bg-zinc-800 hover:bg-zinc-700 text-white text-xs font-bold transition-all shadow-md">
-            <Sparkles className="w-4 h-4 text-orange-400" />
-            <span>AI Teacher&apos;s Toolkit</span>
+          <button className="w-full flex items-center justify-center gap-2.5 px-4 py-2.5 rounded-full border-[3.5px] border-[#ff6746] bg-[#2c2c2c] hover:bg-[#383838] text-white text-xs font-bold transition-all shadow-sm">
+            <Sparkles className="w-4 h-4 text-white fill-white shrink-0" />
+            <span className="text-white font-bold tracking-tight">AI Teacher&apos;s Toolkit</span>
           </button>
         )}
       </div>
