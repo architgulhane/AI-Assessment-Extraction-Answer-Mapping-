@@ -357,40 +357,14 @@ export default function UploadPage() {
                   Upload both files to get started
                 </p>
 
-                {/* Circular Teacher illustration */}
-                <div className="relative w-32 h-32 mb-10 flex items-center justify-center">
-                  {/* Circular border rings */}
-                  <div className="absolute inset-0 rounded-full border border-orange-200/30 scale-110"></div>
-                  <div className="absolute inset-0 rounded-full bg-gradient-to-b from-orange-100 to-orange-50/20 shadow-inner flex items-center justify-center overflow-hidden border border-orange-200/50">
-                    {/* SVG Teacher avatar representation holding a notebook */}
-                    <svg
-                      viewBox="0 0 100 100"
-                      className="w-20 h-20 text-slate-800 mt-4"
-                      xmlns="http://www.w3.org/2000/svg"
-                    >
-                      {/* Avatar Head */}
-                      <circle cx="50" cy="35" r="18" fill="#F8C39E" />
-                      {/* Avatar Hair */}
-                      <path d="M30 35c0-12 8-20 20-20s20 8 20 20c0 4-2 8-6 10-2-8-6-10-14-10s-12 2-14 10c-4-2-6-6-6-10z" fill="#2E2E2E" />
-                      {/* Glasses */}
-                      <rect x="38" y="32" width="10" height="6" rx="2" fill="none" stroke="#2E2E2E" strokeWidth="2" />
-                      <rect x="52" y="32" width="10" height="6" rx="2" fill="none" stroke="#2E2E2E" strokeWidth="2" />
-                      <line x1="48" y1="35" x2="52" y2="35" stroke="#2E2E2E" strokeWidth="2" />
-                      {/* Mouth/Eyes */}
-                      <path d="M47 43c2 1 4 1 6 0" stroke="#2E2E2E" strokeWidth="1.5" strokeLinecap="round" fill="none" />
-                      {/* Body & Book */}
-                      <path d="M25 85c0-10 10-18 25-18s25 8 25 18H25z" fill="#3B82F6" />
-                      <rect x="40" y="60" width="20" height="24" rx="2" fill="#E2E8F0" stroke="#1E293B" strokeWidth="2" />
-                      <line x1="50" y1="64" x2="50" y2="80" stroke="#94A3B8" strokeWidth="1.5" />
-                      {/* Hands */}
-                      <circle cx="38" cy="72" r="5" fill="#F8C39E" />
-                      <circle cx="62" cy="72" r="5" fill="#F8C39E" />
-                    </svg>
-                  </div>
-                  {/* Floating orange bubbles */}
-                  <div className="absolute top-2 right-2 w-4 h-4 rounded-full bg-orange-500 border-2 border-white shadow-sm flex items-center justify-center text-[8px] text-white font-bold">1</div>
-                  <div className="absolute bottom-4 left-0 w-3 h-3 rounded-full bg-orange-400 border-2 border-white shadow-sm"></div>
-                  <div className="absolute bottom-1 right-2 w-3.5 h-3.5 rounded-full bg-orange-300 border-2 border-white shadow-sm"></div>
+                {/* 3D Teacher Avatar Hero Illustration */}
+                <div className="relative w-48 h-48 mb-8 flex items-center justify-center">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src="/teacher-hero.png"
+                    alt="VedaAI Teacher Hero"
+                    className="w-full h-full object-contain drop-shadow-md select-none"
+                  />
                 </div>
 
                 {/* Upload Cards Grid */}
