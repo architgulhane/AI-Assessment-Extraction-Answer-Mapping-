@@ -360,7 +360,7 @@ export default function UploadPage() {
                 </p>
 
                 {/* 3D Teacher Avatar Hero Illustration */}
-                <div className="relative w-48 h-48 mb-8 flex items-center justify-center">
+                <div className="relative w-56 h-56 mb-6 flex items-center justify-center">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src="/teacher-hero.png"
