@@ -708,7 +708,7 @@ export default function ReviewPage() {
                     const isPartial = matchedQ && grading && score > 0 && score < maxMarks;
                     const isZero = matchedQ && grading && score === 0;
 
-                    let outcomeBorderColor = "border-slate-400";
+                    let outcomeBorderColor = "border-slate-500";
                     let outcomeBgColor = "bg-slate-500/10";
                     let labelBgColor = "bg-slate-600";
                     let questionLabelText = "Unmatched";
@@ -716,19 +716,19 @@ export default function ReviewPage() {
                     if (matchedQ) {
                       questionLabelText = `Q${matchedQ.number}${matchedQ.subPart ? matchedQ.subPart : ""}`;
                       if (isFull) {
-                        outcomeBorderColor = "border-emerald-500";
+                        outcomeBorderColor = "border-emerald-600";
                         outcomeBgColor = "bg-emerald-500/10";
                         labelBgColor = "bg-emerald-600";
                       } else if (isPartial) {
-                        outcomeBorderColor = "border-amber-500";
+                        outcomeBorderColor = "border-amber-600";
                         outcomeBgColor = "bg-amber-500/10";
                         labelBgColor = "bg-amber-500";
                       } else if (isZero) {
-                        outcomeBorderColor = "border-rose-500";
+                        outcomeBorderColor = "border-rose-600";
                         outcomeBgColor = "bg-rose-500/10";
                         labelBgColor = "bg-rose-600";
                       } else {
-                        outcomeBorderColor = "border-emerald-500";
+                        outcomeBorderColor = "border-emerald-600";
                         outcomeBgColor = "bg-emerald-500/10";
                         labelBgColor = "bg-emerald-600";
                       }
@@ -746,7 +746,7 @@ export default function ReviewPage() {
                     } else if (isRemapActive) {
                       overlayClass = `border-2 ${borderStyle} ${outcomeBorderColor} ${outcomeBgColor} z-30 opacity-100 shadow-md cursor-pointer`;
                     } else {
-                      overlayClass = `border ${borderStyle} ${outcomeBorderColor} opacity-40 bg-transparent hover:opacity-100 hover:border-2 hover:${outcomeBgColor} z-10 hover:z-20 transition-all duration-150 cursor-pointer`;
+                      overlayClass = `border-2 ${borderStyle} ${outcomeBorderColor} opacity-75 bg-transparent hover:opacity-100 hover:${outcomeBgColor} z-10 hover:z-20 transition-all duration-150 cursor-pointer`;
                     }
 
                     return (
