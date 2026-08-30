@@ -38,17 +38,62 @@ export function base64ToGenerativePart(base64DataUrl: string) {
 // In-memory cache for available models list
 let cachedAvailableModels: string[] | null = null;
 
-// Static fallback list if REST/SDK discovery endpoint is unavailable on startup
+// Permanently blacklisted dead models that return 404s despite appearing in list-models responses
+const HARDCODED_DEAD_MODELS = new Set([
+  "gemini-2.5-flash-lite",
+  "gemini-2.5-flash",
+]);
+
+// Preferred candidate chain order specified by system requirements
+const PREFERRED_MODEL_ORDER = [
+  "gemini-3.5-flash",
+  "gemini-flash-latest",
+  "gemini-3.1-flash-lite",
+];
+
+// Runtime memory tracking for failures across API requests
+const runtimeHardFailedModels = new Set<string>();
+const runtimeQuotaCooldowns = new Map<string, number>();
+const QUOTA_COOLDOWN_MS = 3 * 60 * 1000; // 3 minute cooldown for 429 quota errors
+
+// Static fallback list if REST/SDK discovery endpoint is unavailable
 const STATIC_FALLBACK_MODELS = [
+  "gemini-3.5-flash",
+  "gemini-flash-latest",
+  "gemini-3.1-flash-lite",
   "gemini-2.0-flash",
   "gemini-1.5-flash",
-  "gemini-2.5-flash",
-  "gemini-1.5-pro",
 ];
+
+export function sortAndFilterCandidateModels(discovered: string[]): string[] {
+  const validDiscovered = discovered.filter(
+    (m) => !HARDCODED_DEAD_MODELS.has(m) && !runtimeHardFailedModels.has(m)
+  );
+
+  const ordered: string[] = [];
+
+  // First add preferred models in exact specified order if not hard-failed
+  for (const preferred of PREFERRED_MODEL_ORDER) {
+    if (!HARDCODED_DEAD_MODELS.has(preferred) && !runtimeHardFailedModels.has(preferred)) {
+      if (!ordered.includes(preferred)) {
+        ordered.push(preferred);
+      }
+    }
+  }
+
+  // Then add remaining valid discovered models
+  for (const model of validDiscovered) {
+    if (!ordered.includes(model)) {
+      ordered.push(model);
+    }
+  }
+
+  return ordered;
+}
 
 export async function getAvailableModels(): Promise<string[]> {
   if (cachedAvailableModels && cachedAvailableModels.length > 0) {
-    return cachedAvailableModels;
+    return sortAndFilterCandidateModels(cachedAvailableModels);
   }
 
   try {
@@ -64,20 +109,10 @@ export async function getAvailableModels(): Promise<string[]> {
           .map((m: { name: string }) => m.name.replace(/^models\//, ""));
 
         if (discovered.length > 0) {
-          // Sort by preference order (flash-lite > flash > pro)
-          discovered.sort((a: string, b: string) => {
-            const getScore = (name: string) => {
-              if (name.includes("flash-lite")) return 1;
-              if (name.includes("flash")) return 2;
-              if (name.includes("pro")) return 3;
-              return 4;
-            };
-            return getScore(a) - getScore(b);
-          });
-
           cachedAvailableModels = discovered;
-          console.log("[Gemini API] Dynamically discovered available models:", discovered);
-          return discovered;
+          const filtered = sortAndFilterCandidateModels(discovered);
+          console.log("[Gemini API] Dynamically discovered available models (filtered):", filtered);
+          return filtered;
         }
       }
     }
@@ -86,12 +121,12 @@ export async function getAvailableModels(): Promise<string[]> {
   }
 
   cachedAvailableModels = STATIC_FALLBACK_MODELS;
-  return STATIC_FALLBACK_MODELS;
+  return sortAndFilterCandidateModels(STATIC_FALLBACK_MODELS);
 }
 
 export async function getGeminiModel(generationConfig?: GenerationConfig): Promise<GenerativeModel> {
   const models = await getAvailableModels();
-  const modelName = process.env.GEMINI_MODEL_NAME || models[0] || "gemini-1.5-flash";
+  const modelName = process.env.GEMINI_MODEL_NAME || models[0] || "gemini-3.5-flash";
   return genAI.getGenerativeModel({
     model: modelName,
     generationConfig,
@@ -127,10 +162,24 @@ export async function generateContentWithRetry(
   }
 
   const candidateModels = await getAvailableModels();
+  const now = Date.now();
   let lastError: unknown = null;
 
   for (let mIdx = 0; mIdx < candidateModels.length; mIdx++) {
     const modelName = candidateModels[mIdx];
+
+    // Check permanently hard-failed models
+    if (HARDCODED_DEAD_MODELS.has(modelName) || runtimeHardFailedModels.has(modelName)) {
+      continue;
+    }
+
+    // Check active quota cooldowns
+    const cooldownUntil = runtimeQuotaCooldowns.get(modelName);
+    if (cooldownUntil && now < cooldownUntil) {
+      // Model is in active quota cooldown, skip to next candidate immediately
+      continue;
+    }
+
     const model = genAI.getGenerativeModel({
       model: modelName,
       generationConfig: generationConfig as GenerationConfig,
@@ -147,7 +196,8 @@ export async function generateContentWithRetry(
       // 1. 404 / invalid-argument check (Model not found or invalid config)
       const isNotFound = status === 404 || errorMsg.includes("404") || errorMsg.includes("not found");
       if (isNotFound) {
-        console.error(`[Gemini API Config Error] Model '${modelName}' not found or unsupported (404). Skipping model.`);
+        console.error(`[Gemini API Config Error] Model '${modelName}' not found or unsupported (404). Permanently blacklisting.`);
+        runtimeHardFailedModels.add(modelName);
         continue;
       }
 
@@ -164,7 +214,7 @@ export async function generateContentWithRetry(
         }
       }
 
-      // 3. 429 Quota / Rate Limit check -> Log warning and transition to next candidate model
+      // 3. 429 Quota / Rate Limit check -> Log warning, set cooldown, and transition to next candidate model
       const isQuotaError =
         status === 429 ||
         errorMsg.includes("429") ||
@@ -174,7 +224,8 @@ export async function generateContentWithRetry(
         errorMsg.includes("RESOURCE_EXHAUSTED");
 
       if (isQuotaError) {
-        console.warn(`[Gemini Quota Exhausted on ${modelName}] Transitioning to next candidate model...`);
+        console.warn(`[Gemini Quota Exhausted on ${modelName}] Setting 3-min cooldown and transitioning to next candidate model...`);
+        runtimeQuotaCooldowns.set(modelName, Date.now() + QUOTA_COOLDOWN_MS);
         continue;
       }
 
