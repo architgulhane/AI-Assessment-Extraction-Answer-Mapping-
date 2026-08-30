@@ -1,5 +1,7 @@
 "use client";
 
+export const dynamic = "force-dynamic";
+
 import React, { useState } from "react";
 import Sidebar from "@/components/Sidebar";
 import Topbar from "@/components/Topbar";
@@ -200,14 +202,14 @@ export default function UploadPage() {
       <Sidebar isCollapsed={isSidebarCollapsed} onToggleCollapse={setIsSidebarCollapsed} />
 
       {/* Main content body */}
-      <div className="flex-1 flex flex-col overflow-hidden bg-slate-50">
+      <div className="flex-1 flex flex-col overflow-hidden bg-slate-50 relative">
         <Topbar breadcrumbs={["Exams"]} />
 
-        <main className="flex-1 overflow-y-auto flex items-center justify-center p-8 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-slate-200/50 via-slate-100 to-slate-50/50">
-          <div className="w-full max-w-4xl">
+        <main className="flex-1 overflow-y-auto flex items-center justify-center p-8 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-slate-200/50 via-slate-100 to-slate-50/50 relative shadow-inner">
+          <div className="w-full max-w-4xl relative z-10 my-auto">
             {isProcessing ? (
               /* FIGMA REPLICATED PROCESSING STATE */
-              <div className="flex flex-col items-center justify-center py-20 bg-white border border-slate-200 rounded-3xl shadow-sm text-center">
+              <div className="flex flex-col items-center justify-center py-20 bg-white border border-slate-200/80 rounded-3xl shadow-hero-card text-center">
                 {/* Large Orange Sparkle loading animation */}
                 <div className="relative w-24 h-24 mb-6 flex items-center justify-center">
                   <div className="absolute w-12 h-12 text-orange-500 animate-pulse">
@@ -234,15 +236,18 @@ export default function UploadPage() {
                 </div>
               </div>
             ) : (
-              /* FIGMA REPLICATED UPLOAD STATE */
+              /* UPLOAD STATE - MATCHING REFERENCE IMAGE 1 & 2 */
               <div className="flex flex-col items-center">
-                {/* Title */}
-                <h1 className="text-3xl font-black text-slate-800 text-center tracking-tight leading-normal mb-1">
-                  Upload <span className="inline-block px-4 py-1 rounded-2xl bg-orange-100/70 border border-orange-200/50 text-orange-600 text-2xl font-extrabold shadow-sm">Question Paper & Answer Sheets</span>
+                {/* Title using Poppins weights */}
+                <h1 className="text-3xl sm:text-4xl font-bold text-slate-900 text-center tracking-tight leading-tight mb-2 flex items-center justify-center flex-wrap gap-2.5">
+                  <span className="font-bold">Upload</span>
+                  <span className="inline-flex items-center px-4 py-1 rounded-2xl bg-[#faece7] border border-[#fbd4c8]/60 text-[#ff5622] text-2xl sm:text-3xl font-extrabold tracking-tight">
+                    Question Paper &amp; Answer Sheets
+                  </span>
                 </h1>
                 
                 {/* Subtitle */}
-                <p className="text-sm font-semibold text-slate-500 text-center mb-8">
+                <p className="text-sm font-medium text-slate-500 text-center mb-8">
                   Upload both files to get started
                 </p>
 
@@ -405,7 +410,7 @@ export default function UploadPage() {
                 </button>
 
                 {/* Helper subtext */}
-                <p className="text-[11px] font-semibold text-slate-400 text-center mt-3">
+                <p className="text-[11px] font-semibold text-slate-500 text-center mt-3">
                   Once both files are uploaded, you&apos;ll able to map answers with questions
                 </p>
               </div>

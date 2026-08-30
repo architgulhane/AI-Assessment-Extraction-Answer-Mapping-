@@ -88,12 +88,12 @@ export default function UploadCard({
       <h3 className="text-slate-800 text-sm font-semibold mb-2">{title}</h3>
       
       <div
-        className={`flex-1 flex flex-col items-center justify-center border-2 border-dashed rounded-xl p-8 text-center transition-all duration-300 relative ${
+        className={`flex-1 flex flex-col items-center justify-center border-2 border-dashed rounded-2xl p-8 text-center transition-all duration-300 relative shadow-sm ${
           fileName
-            ? "border-emerald-200 bg-emerald-50/20"
+            ? "border-emerald-200 bg-emerald-50/20 shadow-md"
             : isDragActive
-            ? "border-indigo-500 bg-indigo-50/30"
-            : "border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50/50"
+            ? "border-indigo-500 bg-indigo-50/30 shadow-md"
+            : "border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50/50 hover:shadow-md"
         }`}
         onDragEnter={handleDrag}
         onDragOver={handleDrag}

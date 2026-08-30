@@ -14,6 +14,8 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 
+import VedaLogo from "./VedaLogo";
+
 type SidebarProps = {
   isCollapsed?: boolean;
   onToggleCollapse?: (collapsed: boolean) => void;
@@ -36,27 +38,13 @@ export default function Sidebar({ isCollapsed = false, onToggleCollapse }: Sideb
 
   return (
     <aside
-      className={`border-r border-slate-200 bg-white flex flex-col h-full shrink-0 transition-all duration-300 ${
-        isCollapsed ? "w-20" : "w-64"
-      }`}
+      className={`border-r border-slate-200 bg-white flex flex-col h-full shrink-0 transition-all duration-300 ${isCollapsed ? "w-20" : "w-64"
+        }`}
     >
-      {/* Brand logo */}
-      <div className={`h-16 flex items-center border-b border-slate-200 shrink-0 ${
-        isCollapsed ? "justify-center px-0" : "px-6 gap-3"
-      }`}>
-        <div className="w-10 h-10 rounded-xl bg-slate-900 flex items-center justify-center text-white shadow-sm shrink-0">
-          {/* Stylized rounded box V logo */}
-          <svg
-            className="w-5 h-5 fill-current"
-            viewBox="0 0 24 24"
-            xmlns="http://www.w3.org/2000/svg"
-          >
-            <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-2 7.5l-4.5 9-4.5-9h2.2l2.3 4.6 2.3-4.6H17z" />
-          </svg>
-        </div>
-        {!isCollapsed && (
-          <span className="font-bold text-slate-800 text-lg tracking-tight">VedaAI</span>
-        )}
+      {/* Brand logo matching Image 3 */}
+      <div className={`h-16 flex items-center border-b border-slate-200 shrink-0 ${isCollapsed ? "justify-center px-0" : "px-6"
+        }`}>
+        <VedaLogo isCollapsed={isCollapsed} size="md" />
       </div>
 
       {/* AI Teacher's Toolkit Pill */}
@@ -86,15 +74,13 @@ export default function Sidebar({ isCollapsed = false, onToggleCollapse }: Sideb
             <Link
               key={item.name}
               href={item.disabled ? "#" : item.href}
-              className={`flex items-center rounded-xl text-sm font-semibold transition-all duration-200 ${
-                isCollapsed ? "justify-center p-2.5" : "px-4 py-3 gap-3"
-              } ${
-                isActive
+              className={`flex items-center rounded-xl text-sm font-semibold transition-all duration-200 ${isCollapsed ? "justify-center p-2.5" : "px-4 py-3 gap-3"
+                } ${isActive
                   ? "bg-slate-100 text-slate-900 font-bold"
                   : item.disabled
-                  ? "text-slate-400 cursor-not-allowed hover:bg-slate-50/50"
-                  : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
-              }`}
+                    ? "text-slate-400 cursor-not-allowed hover:bg-slate-50/50"
+                    : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+                }`}
               onClick={(e) => {
                 if (item.disabled) {
                   e.preventDefault();
@@ -103,9 +89,8 @@ export default function Sidebar({ isCollapsed = false, onToggleCollapse }: Sideb
               title={isCollapsed ? item.name : undefined}
             >
               <Icon
-                className={`w-5 h-5 ${
-                  isActive ? "text-slate-800" : "text-slate-400 group-hover:text-slate-600"
-                }`}
+                className={`w-5 h-5 ${isActive ? "text-slate-800" : "text-slate-400 group-hover:text-slate-600"
+                  }`}
               />
               {!isCollapsed && <span>{item.name}</span>}
             </Link>
@@ -125,8 +110,8 @@ export default function Sidebar({ isCollapsed = false, onToggleCollapse }: Sideb
               <School className="w-5 h-5" />
             </div>
             <div className="flex flex-col min-w-0">
-              <span className="text-xs font-bold text-slate-800 leading-tight truncate">Delhi Public School</span>
-              <span className="text-[10px] text-slate-400 leading-none truncate mt-0.5">Bokaro Steel City</span>
+              <span className="text-xs font-bold text-slate-800 leading-tight truncate">Veda AI</span>
+              <span className="text-[10px] text-slate-400 leading-none truncate mt-0.5">Archit Gulhane</span>
             </div>
           </div>
         )}
@@ -134,9 +119,8 @@ export default function Sidebar({ isCollapsed = false, onToggleCollapse }: Sideb
         {/* Collapse toggle button */}
         <button
           onClick={handleToggle}
-          className={`flex items-center text-slate-400 hover:text-slate-700 transition-colors mt-4 w-full ${
-            isCollapsed ? "justify-center p-1" : "px-2 py-1 justify-between text-xs font-semibold"
-          }`}
+          className={`flex items-center text-slate-400 hover:text-slate-700 transition-colors mt-4 w-full ${isCollapsed ? "justify-center p-1" : "px-2 py-1 justify-between text-xs font-semibold"
+            }`}
         >
           {isCollapsed ? (
             <ChevronRight className="w-5 h-5" />

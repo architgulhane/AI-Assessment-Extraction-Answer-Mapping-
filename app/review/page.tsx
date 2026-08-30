@@ -1,5 +1,7 @@
 "use client";
 
+export const dynamic = "force-dynamic";
+
 import React, { useState, useEffect } from "react";
 import Sidebar from "@/components/Sidebar";
 import Topbar from "@/components/Topbar";
@@ -14,8 +16,12 @@ import {
   ChevronUp,
   Sparkles,
   Info,
+  Pencil,
+  Check,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
+
+type FilterType = "all" | "needs-review" | "unanswered";
 
 export default function ReviewPage() {
   const router = useRouter();
@@ -23,7 +29,9 @@ export default function ReviewPage() {
     questions,
     answerBlocks,
     mappedResults,
+    setMappedResults,
     gradedResults,
+    setGradedResults,
     answerSheetImages,
   } = useVeda();
 
@@ -34,6 +42,67 @@ export default function ReviewPage() {
   const [zoomLevel, setZoomLevel] = useState(100);
   const [expandedFeedbackIds, setExpandedFeedbackIds] = useState<Set<string>>(new Set());
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(true); // Default to collapsed in review!
+  const [editingScoreQId, setEditingScoreQId] = useState<string | null>(null);
+  const [tempScore, setTempScore] = useState<string>("");
+  const [activeRemapBlockId, setActiveRemapBlockId] = useState<string | null>(null);
+  const [filter, setFilter] = useState<FilterType>("all");
+
+  const handleRemapBlock = (blockId: string, newQuestionId: string | null) => {
+    // 1. Remove blockId from any existing mappings
+    const updated = mappedResults.map((m) => ({
+      ...m,
+      answerBlockIds: m.answerBlockIds.filter((id) => id !== blockId),
+    }));
+
+    // 2. If assigning to a question
+    if (newQuestionId) {
+      const existingIndex = updated.findIndex((m) => m.questionId === newQuestionId);
+      if (existingIndex >= 0) {
+        updated[existingIndex] = {
+          ...updated[existingIndex],
+          answerBlockIds: [...updated[existingIndex].answerBlockIds, blockId],
+          matchMethod: "explicit-label",
+        };
+      } else {
+        updated.push({
+          questionId: newQuestionId,
+          answerBlockIds: [blockId],
+          matchMethod: "explicit-label",
+        });
+      }
+      setSelectedQuestionId(newQuestionId);
+    }
+
+    setMappedResults(updated);
+    setActiveRemapBlockId(null);
+  };
+
+  const handleScoreChange = (qId: string, rawVal: string) => {
+    const num = parseFloat(rawVal);
+    const existing = gradedResults.find((g) => g.questionId === qId);
+    const q = questions.find((item) => item.id === qId);
+    const max = existing ? existing.maxMarks : (q?.maxMarks || 5);
+    const validScore = isNaN(num) ? 0 : Math.max(0, Math.min(max, num));
+
+    if (existing) {
+      setGradedResults(
+        gradedResults.map((g) =>
+          g.questionId === qId ? { ...g, score: validScore } : g
+        )
+      );
+    } else {
+      setGradedResults([
+        ...gradedResults,
+        {
+          questionId: qId,
+          score: validScore,
+          maxMarks: max,
+          feedback: "Manually adjusted score.",
+        },
+      ]);
+    }
+    setEditingScoreQId(null);
+  };
 
   useEffect(() => {
     if (questions.length > 0) {
@@ -144,6 +213,52 @@ export default function ReviewPage() {
     )
     .map((b) => b.id);
 
+  // Grading Summary calculations
+  const totalQuestions = questions.length;
+  const answeredCount = questions.filter((q) => {
+    const m = mappedResults.find((r) => r.questionId === q.id);
+    return m && m.answerBlockIds && m.answerBlockIds.length > 0;
+  }).length;
+  const unansweredCount = totalQuestions - answeredCount;
+
+  const totalScore = questions.reduce((acc, q) => {
+    const g = gradedResults.find((gr) => gr.questionId === q.id);
+    return acc + (g ? g.score : 0);
+  }, 0);
+
+  const totalPossibleMarks = questions.reduce((acc, q) => {
+    const g = gradedResults.find((gr) => gr.questionId === q.id);
+    return acc + (g ? g.maxMarks : q.maxMarks || 5);
+  }, 0);
+
+  const overallPercentage =
+    totalPossibleMarks > 0 ? Math.round((totalScore / totalPossibleMarks) * 100) : 0;
+
+  const filteredQuestions = questions.filter((q) => {
+    const { mapping, grading } = getQuestionDetails(q.id);
+    const isUnanswered = !mapping || !mapping.answerBlockIds || mapping.answerBlockIds.length === 0;
+    
+    if (filter === "unanswered") {
+      return isUnanswered;
+    }
+    
+    if (filter === "needs-review") {
+      const score = grading ? grading.score : 0;
+      const max = grading ? grading.maxMarks : q.maxMarks || 5;
+      return score < max || isUnanswered;
+    }
+    
+    return true;
+  });
+
+  const needsReviewCount = questions.filter((q) => {
+    const { mapping, grading } = getQuestionDetails(q.id);
+    const isUnanswered = !mapping || !mapping.answerBlockIds || mapping.answerBlockIds.length === 0;
+    const score = grading ? grading.score : 0;
+    const max = grading ? grading.maxMarks : q.maxMarks || 5;
+    return score < max || isUnanswered;
+  }).length;
+
   return (
     <div className="flex h-screen overflow-hidden">
       {/* Sidebar navigation */}
@@ -160,23 +275,98 @@ export default function ReviewPage() {
           <div className="w-[480px] border-r border-slate-200 bg-white flex flex-col overflow-hidden shrink-0">
             
             {/* Header info */}
-            <div className="p-5 border-b border-slate-100 flex items-center justify-between">
+            <div className="p-4 border-b border-slate-100 flex items-center justify-between">
               <div>
                 <h2 className="text-sm font-bold text-slate-800">
-                  Extracted Questions (from question paper)
+                  Assessment Overview
                 </h2>
               </div>
               <button
                 onClick={expandedFeedbackIds.size === questions.length ? collapseAll : expandAll}
-                className="text-xs font-bold text-slate-500 hover:text-indigo-600 transition-colors px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 shadow-sm"
+                className="text-xs font-bold text-slate-500 hover:text-indigo-600 transition-colors px-2.5 py-1 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 shadow-sm"
               >
                 {expandedFeedbackIds.size === questions.length ? "Collapse All" : "Expand All"}
               </button>
             </div>
 
+            {/* Persistent Grading Summary Header */}
+            <div className="p-4 bg-slate-50/80 border-b border-slate-200/80">
+              <div className="flex items-center justify-between mb-2.5">
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Grading Summary</span>
+                <span className={`text-xs font-black px-2 py-0.5 rounded-full ${
+                  overallPercentage >= 80
+                    ? "bg-emerald-100 text-emerald-700"
+                    : overallPercentage >= 50
+                    ? "bg-amber-100 text-amber-700"
+                    : "bg-rose-100 text-rose-700"
+                }`}>
+                  {overallPercentage}% Score
+                </span>
+              </div>
+              <div className="grid grid-cols-4 gap-2 text-center">
+                <div className="bg-white p-2 rounded-xl border border-slate-200/60 shadow-xs">
+                  <div className="text-[10px] text-slate-400 font-semibold uppercase">Total Qs</div>
+                  <div className="text-sm font-black text-slate-800">{totalQuestions}</div>
+                </div>
+                <div className="bg-white p-2 rounded-xl border border-slate-200/60 shadow-xs">
+                  <div className="text-[10px] text-emerald-600 font-semibold uppercase">Answered</div>
+                  <div className="text-sm font-black text-emerald-700">{answeredCount}</div>
+                </div>
+                <div className="bg-white p-2 rounded-xl border border-slate-200/60 shadow-xs">
+                  <div className="text-[10px] text-amber-600 font-semibold uppercase">Unanswered</div>
+                  <div className="text-sm font-black text-amber-700">{unansweredCount}</div>
+                </div>
+                <div className="bg-white p-2 rounded-xl border border-slate-200/60 shadow-xs">
+                  <div className="text-[10px] text-indigo-600 font-semibold uppercase">Marks</div>
+                  <div className="text-sm font-black text-indigo-700">{totalScore}/{totalPossibleMarks}</div>
+                </div>
+              </div>
+            </div>
+
+            {/* Filter Toggle Control */}
+            <div className="p-3 bg-white border-b border-slate-200/80">
+              <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl">
+                <button
+                  onClick={() => setFilter("all")}
+                  className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-bold transition-all ${
+                    filter === "all"
+                      ? "bg-white text-slate-800 shadow-xs"
+                      : "text-slate-500 hover:text-slate-700"
+                  }`}
+                >
+                  All ({questions.length})
+                </button>
+                <button
+                  onClick={() => setFilter("needs-review")}
+                  className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-bold transition-all ${
+                    filter === "needs-review"
+                      ? "bg-white text-amber-700 shadow-xs"
+                      : "text-slate-500 hover:text-slate-700"
+                  }`}
+                >
+                  Needs Review ({needsReviewCount})
+                </button>
+                <button
+                  onClick={() => setFilter("unanswered")}
+                  className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-bold transition-all ${
+                    filter === "unanswered"
+                      ? "bg-white text-rose-700 shadow-xs"
+                      : "text-slate-500 hover:text-slate-700"
+                  }`}
+                >
+                  Unanswered ({unansweredCount})
+                </button>
+              </div>
+            </div>
+
             {/* Questions list container */}
             <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50/50">
-              {questions.map((q) => {
+              {filteredQuestions.length === 0 ? (
+                <div className="p-8 text-center bg-white rounded-2xl border border-slate-200 text-slate-400">
+                  <p className="text-xs font-bold">No questions in this filter.</p>
+                </div>
+              ) : (
+                filteredQuestions.map((q) => {
                 const { mapping, grading } = getQuestionDetails(q.id);
                 const isSelected = selectedQuestionId === q.id;
                 const isExpanded = expandedFeedbackIds.has(q.id);
@@ -227,10 +417,49 @@ export default function ReviewPage() {
                             {q.subPart && `(${q.subPart})`}
                           </span>
                           
-                          {/* Score Badge */}
-                          <div className={`px-2.5 py-0.5 rounded-full border text-[11px] font-black leading-none ${badgeColor}`}>
-                            {score}/{max}
-                          </div>
+                          {/* Score Badge with Manual Override */}
+                          {editingScoreQId === q.id ? (
+                            <div
+                              className="flex items-center gap-1 bg-white border border-indigo-300 rounded-lg p-0.5 shadow-sm"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <input
+                                type="number"
+                                step="0.5"
+                                min={0}
+                                max={max}
+                                autoFocus
+                                value={tempScore}
+                                onChange={(e) => setTempScore(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") handleScoreChange(q.id, tempScore);
+                                  if (e.key === "Escape") setEditingScoreQId(null);
+                                }}
+                                className="w-10 px-1 py-0.5 text-xs font-bold text-center text-slate-800 focus:outline-none border-b border-indigo-400"
+                              />
+                              <span className="text-[10px] text-slate-400 font-bold">/{max}</span>
+                              <button
+                                onClick={() => handleScoreChange(q.id, tempScore)}
+                                className="p-1 rounded bg-indigo-50 hover:bg-indigo-100 text-indigo-600 transition-colors"
+                                title="Save score"
+                              >
+                                <Check className="w-3 h-3" />
+                              </button>
+                            </div>
+                          ) : (
+                            <div
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setEditingScoreQId(q.id);
+                                setTempScore(String(score));
+                              }}
+                              title="Click to override score"
+                              className={`group/score flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border text-[11px] font-black leading-none cursor-pointer hover:shadow-xs transition-all ${badgeColor}`}
+                            >
+                              <span>{score}/{max}</span>
+                              <Pencil className="w-2.5 h-2.5 opacity-40 group-hover/score:opacity-100 transition-opacity" />
+                            </div>
+                          )}
                         </div>
 
                         <p className="text-sm font-semibold text-slate-800 leading-relaxed mb-3">
@@ -269,11 +498,19 @@ export default function ReviewPage() {
                             </div>
                           )}
 
-                          {mapping?.matchMethod === "embedding-fallback" && (
-                            <span className="inline-flex items-center gap-1 text-[10px] text-amber-600 font-bold ml-auto bg-amber-50 border border-amber-100 rounded px-1.5 py-0.5">
-                              <Sparkles className="w-3 h-3" />
-                              AI Fallback Match ({Math.round((mapping.matchConfidence || 0) * 100)}%)
-                            </span>
+                          {/* Match method badge */}
+                          {mapping && mapping.answerBlockIds.length > 0 && (
+                            mapping.matchMethod === "explicit-label" ? (
+                              <span className="inline-flex items-center gap-1 text-[10px] text-sky-700 font-bold ml-auto bg-sky-50 border border-sky-100 rounded-md px-2 py-0.5">
+                                <span className="w-1.5 h-1.5 rounded-full bg-sky-500"></span>
+                                Student Labeled
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 text-[10px] text-amber-700 font-bold ml-auto bg-amber-50 border border-amber-200/70 rounded-md px-2 py-0.5">
+                                <Sparkles className="w-3 h-3 text-amber-500" />
+                                AI Inferred {mapping.matchConfidence ? `(${Math.round(mapping.matchConfidence * 100)}%)` : ""}
+                              </span>
+                            )
                           )}
                         </div>
                       </div>
@@ -305,7 +542,7 @@ export default function ReviewPage() {
                     )}
                   </div>
                 );
-              })}
+              }))}
 
               {/* Unmatched Answer Blocks Section */}
               {unmatchedBlockIds.length > 0 && (
@@ -354,7 +591,29 @@ export default function ReviewPage() {
             
             {/* Viewer control bar */}
             <div className="h-14 border-b border-slate-200 bg-white flex items-center justify-between px-6 shrink-0 select-none">
-              <span className="text-sm font-bold text-slate-700">Answer Sheet</span>
+              <div className="flex items-center gap-4">
+                <span className="text-sm font-bold text-slate-700">Answer Sheet</span>
+                
+                {/* Color legend */}
+                <div className="hidden lg:flex items-center gap-3 px-3 py-1 rounded-lg bg-slate-50 border border-slate-200/70 text-[11px] font-medium text-slate-600">
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-full bg-orange-500 ring-2 ring-orange-200 shrink-0" />
+                    <span>Selected</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0" />
+                    <span>Full Marks</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-full bg-amber-500 shrink-0" />
+                    <span>Partial</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-full bg-rose-500 shrink-0" />
+                    <span>Zero</span>
+                  </div>
+                </div>
+              </div>
               
               {/* Page navigation */}
               <div className="flex items-center gap-3">
@@ -429,33 +688,55 @@ export default function ReviewPage() {
 
                     const isUnmatched = unmatchedBlockIds.includes(block.id);
                     const isSelected = selectedQuestionBlocks.includes(block.id);
-                    const isMappedButNotSelected = !isUnmatched && !isSelected;
 
-                    let overlayClass = "";
+                    const blockMapping = mappedResults.find((m) =>
+                      m.answerBlockIds && m.answerBlockIds.includes(block.id)
+                    );
+                    const isFallback = blockMapping?.matchMethod === "embedding-fallback";
+                    const borderStyle = isFallback || isUnmatched ? "border-dashed" : "border-solid";
+
+                    const matchedQ = questions.find((q) =>
+                      mappedResults.find((m) => m.questionId === q.id)?.answerBlockIds.includes(block.id)
+                    );
+                    const grading = matchedQ ? gradedResults.find((g) => g.questionId === matchedQ.id) : null;
+                    const score = grading ? grading.score : 0;
+                    const maxMarks = grading ? grading.maxMarks : matchedQ?.maxMarks || 5;
+
+                    const isFull = matchedQ && grading && score === maxMarks && maxMarks > 0;
+                    const isPartial = matchedQ && grading && score > 0 && score < maxMarks;
+                    const isZero = matchedQ && grading && score === 0;
+
+                    let outcomeBorderColor = "border-slate-400";
+                    let outcomeBgColor = "bg-slate-500/5";
                     let labelBgColor = "bg-slate-600";
-                    let questionLabelText = "";
+                    let questionLabelText = "Unmatched";
 
-                    if (isSelected) {
-                      overlayClass = "border-2 border-orange-500 bg-orange-500/15 z-20 scale-[1.01]";
-                      labelBgColor = "bg-orange-500";
-                      
-                      const matchedQ = questions.find((q) =>
-                        mappedResults.find((m) => m.questionId === q.id)?.answerBlockIds.includes(block.id)
-                      );
-                      questionLabelText = matchedQ ? `Q${matchedQ.number}` : "Select";
-                    } else if (isMappedButNotSelected) {
-                      overlayClass = "border-2 border-emerald-500 bg-emerald-500/10 cursor-pointer z-10 hover:z-20";
-                      labelBgColor = "bg-emerald-500";
-                      
-                      const matchedQ = questions.find((q) =>
-                        mappedResults.find((m) => m.questionId === q.id)?.answerBlockIds.includes(block.id)
-                      );
-                      questionLabelText = matchedQ ? `Q${matchedQ.number}` : "Mapped";
-                    } else {
-                      overlayClass = "border-2 border-slate-400 border-dashed bg-slate-500/5 cursor-pointer z-10 hover:z-20";
-                      labelBgColor = "bg-slate-500";
-                      questionLabelText = "Unmatched";
+                    if (matchedQ) {
+                      questionLabelText = `Q${matchedQ.number}${matchedQ.subPart ? matchedQ.subPart : ""}`;
+                      if (isFull) {
+                        outcomeBorderColor = "border-emerald-500";
+                        outcomeBgColor = isSelected ? "bg-emerald-500/20" : "bg-emerald-500/10";
+                        labelBgColor = "bg-emerald-600";
+                      } else if (isPartial) {
+                        outcomeBorderColor = "border-amber-500";
+                        outcomeBgColor = isSelected ? "bg-amber-500/20" : "bg-amber-500/10";
+                        labelBgColor = "bg-amber-600";
+                      } else if (isZero) {
+                        outcomeBorderColor = "border-rose-500";
+                        outcomeBgColor = isSelected ? "bg-rose-500/20" : "bg-rose-500/10";
+                        labelBgColor = "bg-rose-600";
+                      } else {
+                        outcomeBorderColor = "border-emerald-500";
+                        outcomeBgColor = isSelected ? "bg-emerald-500/20" : "bg-emerald-500/10";
+                        labelBgColor = "bg-emerald-600";
+                      }
                     }
+
+                    const selectionClass = isSelected
+                      ? "ring-4 ring-orange-500/60 shadow-lg z-30 scale-[1.005]"
+                      : "z-10 hover:z-20 hover:ring-2 hover:ring-slate-300";
+
+                    const overlayClass = `border-2 ${borderStyle} ${outcomeBorderColor} ${outcomeBgColor} ${selectionClass} cursor-pointer`;
 
                     return (
                       <div
@@ -473,10 +754,69 @@ export default function ReviewPage() {
                           }
                         }}
                       >
-                        {/* Anchor Question Label Box on Bounding Box Border */}
-                        <div className={`absolute -top-3.5 left-2 px-1.5 py-0.5 rounded text-[8px] font-black text-white whitespace-nowrap shadow-sm z-30 select-none ${labelBgColor}`}>
-                          {questionLabelText}
+                        {/* Anchor Question Label Box on Top-Left Corner of its own Bounding Box */}
+                        <div className={`absolute top-1 left-1 px-1.5 py-0.5 rounded text-[9px] font-bold text-white whitespace-nowrap shadow-xs z-30 select-none flex items-center gap-1.5 ${labelBgColor}`}>
+                          <span>{questionLabelText}</span>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setActiveRemapBlockId(activeRemapBlockId === block.id ? null : block.id);
+                            }}
+                            title="Reassign block to a question"
+                            className="bg-black/25 hover:bg-black/40 text-[8px] font-bold px-1 py-0.2 rounded transition-colors"
+                          >
+                            Re-map
+                          </button>
                         </div>
+
+                        {/* Floating Re-map Popover */}
+                        {activeRemapBlockId === block.id && (
+                          <div
+                            className="absolute top-7 left-1 bg-white rounded-xl shadow-2xl border border-slate-200 p-2.5 z-50 min-w-[240px] max-w-[280px] text-slate-800 animate-in fade-in zoom-in-95 cursor-default"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <div className="flex items-center justify-between pb-1.5 mb-1.5 border-b border-slate-100">
+                              <span className="text-[11px] font-bold text-slate-700">Reassign Answer Block</span>
+                              <button
+                                type="button"
+                                onClick={() => setActiveRemapBlockId(null)}
+                                className="text-slate-400 hover:text-slate-600 text-xs px-1"
+                              >
+                                ✕
+                              </button>
+                            </div>
+                            <div className="max-h-48 overflow-y-auto space-y-1">
+                              {questions.map((q) => {
+                                const isCurrent = matchedQ?.id === q.id;
+                                return (
+                                  <button
+                                    key={q.id}
+                                    type="button"
+                                    onClick={() => handleRemapBlock(block.id, q.id)}
+                                    className={`w-full text-left px-2 py-1.5 rounded-lg text-xs flex items-center justify-between transition-colors ${
+                                      isCurrent
+                                        ? "bg-orange-50 text-orange-700 font-bold border border-orange-200"
+                                        : "hover:bg-slate-50 text-slate-700 font-medium"
+                                    }`}
+                                  >
+                                    <span className="truncate pr-2">
+                                      <span className="font-bold">Q{q.number}{q.subPart || ""}:</span> {q.text}
+                                    </span>
+                                    {isCurrent && <Check className="w-3.5 h-3.5 shrink-0 text-orange-600" />}
+                                  </button>
+                                );
+                              })}
+                              <button
+                                type="button"
+                                onClick={() => handleRemapBlock(block.id, null)}
+                                className="w-full text-left px-2 py-1.5 rounded-lg text-xs font-semibold text-rose-600 hover:bg-rose-50 border-t border-slate-100 mt-1 transition-colors flex items-center justify-between"
+                              >
+                                <span>Unassign (Mark Unmatched)</span>
+                              </button>
+                            </div>
+                          </div>
+                        )}
 
                         {/* Overlay Transcription preview tooltip */}
                         <div className="absolute top-full left-1/2 transform -translate-x-1/2 mt-2 w-56 p-2.5 rounded-lg bg-slate-900/95 backdrop-blur-sm text-[10px] text-slate-100 leading-relaxed shadow-md opacity-0 group-hover/box:opacity-100 transition-opacity duration-200 pointer-events-none z-30 break-words font-medium">

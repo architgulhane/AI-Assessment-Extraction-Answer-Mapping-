@@ -56,7 +56,7 @@ export default function Topbar({ breadcrumbs, backUrl, actionButton }: TopbarPro
       {/* Right side: Action button + Icons + Profile */}
       <div className="flex items-center gap-4">
         {actionButton}
-        
+
         {/* Help icon */}
         <button
           className="p-2 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors"
@@ -90,7 +90,7 @@ export default function Topbar({ breadcrumbs, backUrl, actionButton }: TopbarPro
             {/* Fallback initials if image fails */}
           </div>
           <div className="flex items-center gap-1">
-            <span className="text-xs font-bold text-slate-800">Madhur Rastogi</span>
+            <span className="text-xs font-bold text-slate-800">Archit Gulhane</span>
             <ChevronDown className="w-4 h-4 text-slate-400" />
           </div>
         </div>
