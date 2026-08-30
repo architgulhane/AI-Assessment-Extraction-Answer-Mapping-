@@ -86,8 +86,13 @@ export default function Topbar({ breadcrumbs, backUrl, actionButton }: TopbarPro
 
         {/* User profile */}
         <div className="flex items-center gap-2.5 cursor-pointer hover:opacity-90 transition-opacity">
-          <div className="w-9 h-9 rounded-full bg-slate-100 border border-slate-200 overflow-hidden shrink-0 flex items-center justify-center text-slate-600 font-bold text-sm bg-[url('https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=100')] bg-cover">
-            {/* Fallback initials if image fails */}
+          <div className="w-9 h-9 rounded-full bg-slate-100 border border-slate-200 overflow-hidden shrink-0 flex items-center justify-center text-slate-600 font-bold text-sm">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/avatar.jpg"
+              alt="Archit Gulhane"
+              className="w-full h-full object-cover object-top"
+            />
           </div>
           <div className="flex items-center gap-1">
             <span className="text-xs font-bold text-slate-800">Archit Gulhane</span>
