@@ -240,7 +240,9 @@ export default function UploadPage() {
       <div className="flex-1 flex flex-col overflow-hidden bg-slate-50 relative">
         <Topbar breadcrumbs={["Exams"]} />
 
-        <main className="flex-1 overflow-y-auto flex items-center justify-center p-8 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-slate-200/50 via-slate-100 to-slate-50/50 relative shadow-inner">
+        <main className="flex-1 overflow-y-auto flex items-center justify-center p-8 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-slate-100 via-slate-200/70 to-slate-400/60 relative shadow-2xl">
+          {/* Soft dark vignette gradient overlay for enhanced depth */}
+          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_transparent_35%,_rgba(15,23,42,0.12)_100%)] pointer-events-none" />
           <div className="w-full max-w-4xl relative z-10 my-auto">
             {isProcessing ? (
               /* PROCESSING STATE WITH LIVE CHECKPOINT LOGS */
