@@ -23,3 +23,28 @@ class MemoryCache {
 }
 
 export const fileCache = new MemoryCache();
+
+/**
+ * Reusable helper to process items in concurrency-limited batches with delay
+ * to stay under API free-tier rate limits (e.g. Gemini 10 RPM).
+ */
+export async function batchProcess<T, R>(
+  items: T[],
+  batchSize: number,
+  delayMs: number,
+  fn: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  const results: R[] = [];
+  for (let i = 0; i < items.length; i += batchSize) {
+    const chunk = items.slice(i, i + batchSize);
+    const chunkResults = await Promise.all(
+      chunk.map((item, indexWithinChunk) => fn(item, i + indexWithinChunk))
+    );
+    results.push(...chunkResults);
+
+    if (i + batchSize < items.length && delayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+  return results;
+}

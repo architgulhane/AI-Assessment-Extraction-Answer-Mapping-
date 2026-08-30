@@ -26,4 +26,5 @@ export type GradedResult = {
   score: number;
   maxMarks: number;
   feedback: string;
+  gradingStatus?: "graded" | "failed" | "unanswered";
 };

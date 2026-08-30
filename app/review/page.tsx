@@ -222,12 +222,23 @@ export default function ReviewPage() {
   }).length;
   const unansweredCount = totalQuestions - answeredCount;
 
-  const totalScore = questions.reduce((acc, q) => {
+  const failedCount = questions.filter((q) => {
+    const g = gradedResults.find((gr) => gr.questionId === q.id);
+    return g?.gradingStatus === "failed";
+  }).length;
+
+  // Exclude failed questions from percentage score calculation to avoid penalizing with false zeros
+  const evaluableQuestions = questions.filter((q) => {
+    const g = gradedResults.find((gr) => gr.questionId === q.id);
+    return g?.gradingStatus !== "failed";
+  });
+
+  const totalScore = evaluableQuestions.reduce((acc, q) => {
     const g = gradedResults.find((gr) => gr.questionId === q.id);
     return acc + (g ? g.score : 0);
   }, 0);
 
-  const totalPossibleMarks = questions.reduce((acc, q) => {
+  const totalPossibleMarks = evaluableQuestions.reduce((acc, q) => {
     const g = gradedResults.find((gr) => gr.questionId === q.id);
     return acc + (g ? g.maxMarks : q.maxMarks || 5);
   }, 0);
@@ -238,26 +249,28 @@ export default function ReviewPage() {
   const filteredQuestions = questions.filter((q) => {
     const { mapping, grading } = getQuestionDetails(q.id);
     const isUnanswered = !mapping || !mapping.answerBlockIds || mapping.answerBlockIds.length === 0;
-    
+    const isFailed = grading?.gradingStatus === "failed";
+
     if (filter === "unanswered") {
       return isUnanswered;
     }
-    
+
     if (filter === "needs-review") {
       const score = grading ? grading.score : 0;
       const max = grading ? grading.maxMarks : q.maxMarks || 5;
-      return score < max || isUnanswered;
+      return score < max || isUnanswered || isFailed;
     }
-    
+
     return true;
   });
 
   const needsReviewCount = questions.filter((q) => {
     const { mapping, grading } = getQuestionDetails(q.id);
     const isUnanswered = !mapping || !mapping.answerBlockIds || mapping.answerBlockIds.length === 0;
+    const isFailed = grading?.gradingStatus === "failed";
     const score = grading ? grading.score : 0;
     const max = grading ? grading.maxMarks : q.maxMarks || 5;
-    return score < max || isUnanswered;
+    return score < max || isUnanswered || isFailed;
   }).length;
 
   return (
@@ -294,15 +307,22 @@ export default function ReviewPage() {
             <div className="p-4 bg-slate-50/80 border-b border-slate-200/80">
               <div className="flex items-center justify-between mb-2.5">
                 <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Grading Summary</span>
-                <span className={`text-xs font-black px-2 py-0.5 rounded-full ${
-                  overallPercentage >= 80
-                    ? "bg-emerald-100 text-emerald-700"
-                    : overallPercentage >= 50
-                    ? "bg-amber-100 text-amber-700"
-                    : "bg-rose-100 text-rose-700"
-                }`}>
-                  {overallPercentage}% Score
-                </span>
+                <div className="flex items-center gap-2">
+                  {failedCount > 0 && (
+                    <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-slate-200 text-slate-700 border border-slate-300">
+                      {failedCount} Pending AI
+                    </span>
+                  )}
+                  <span className={`text-xs font-black px-2 py-0.5 rounded-full ${
+                    overallPercentage >= 80
+                      ? "bg-emerald-100 text-emerald-700"
+                      : overallPercentage >= 50
+                      ? "bg-amber-100 text-amber-700"
+                      : "bg-rose-100 text-rose-700"
+                  }`}>
+                    {overallPercentage}% Score
+                  </span>
+                </div>
               </div>
               <div className="grid grid-cols-4 gap-2 text-center">
                 <div className="bg-white p-2 rounded-xl border border-slate-200/60 shadow-xs">
@@ -371,6 +391,7 @@ export default function ReviewPage() {
                 const { mapping, grading } = getQuestionDetails(q.id);
                 const isSelected = selectedQuestionId === q.id;
                 const isExpanded = expandedFeedbackIds.has(q.id);
+                const isFailed = grading?.gradingStatus === "failed";
                 
                 // Color badge logic
                 const score = grading ? grading.score : 0;
@@ -379,7 +400,9 @@ export default function ReviewPage() {
                 const isZero = score === 0;
                 
                 let badgeColor = "bg-amber-50 text-amber-600 border-amber-200";
-                if (isFull) {
+                if (isFailed) {
+                  badgeColor = "bg-slate-100 text-slate-600 border-slate-300 font-bold";
+                } else if (isFull) {
                   badgeColor = "bg-emerald-50 text-emerald-600 border-emerald-100";
                 } else if (isZero) {
                   badgeColor = "bg-rose-50 text-rose-600 border-rose-100";
@@ -454,10 +477,10 @@ export default function ReviewPage() {
                                 setEditingScoreQId(q.id);
                                 setTempScore(String(score));
                               }}
-                              title="Click to override score"
+                              title={isFailed ? "Click to set score manually" : "Click to override score"}
                               className={`group/score flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border text-[11px] font-black leading-none cursor-pointer hover:shadow-xs transition-all ${badgeColor}`}
                             >
-                              <span>{score}/{max}</span>
+                              <span>{isFailed ? `—/${max}` : `${score}/${max}`}</span>
                               <Pencil className="w-2.5 h-2.5 opacity-40 group-hover/score:opacity-100 transition-opacity" />
                             </div>
                           )}
@@ -534,12 +557,22 @@ export default function ReviewPage() {
 
                     {/* AI Feedback Section */}
                     {grading && isExpanded && (
-                      <div className="mt-3.5 p-4 rounded-xl border border-slate-100 bg-slate-50 text-xs text-slate-600 leading-relaxed animate-fade-in">
-                        <p className="font-bold text-slate-800 mb-1">
-                          AI Feedback
-                        </p>
-                        {grading.feedback}
-                      </div>
+                      isFailed ? (
+                        <div className="mt-3.5 p-4 rounded-xl border border-slate-200 bg-slate-100/80 text-xs text-slate-600 leading-relaxed">
+                          <p className="font-bold text-slate-700 mb-1 flex items-center gap-1.5">
+                            <AlertTriangle className="w-4 h-4 text-slate-500" />
+                            AI Feedback Unavailable
+                          </p>
+                          AI feedback unavailable — grading service reached its rate limit. Please review this answer manually.
+                        </div>
+                      ) : (
+                        <div className="mt-3.5 p-4 rounded-xl border border-slate-100 bg-slate-50 text-xs text-slate-600 leading-relaxed animate-fade-in">
+                          <p className="font-bold text-slate-800 mb-1">
+                            AI Feedback
+                          </p>
+                          {grading.feedback}
+                        </div>
+                      )
                     )}
                   </div>
                 );
@@ -704,9 +737,10 @@ export default function ReviewPage() {
                     const score = grading ? grading.score : 0;
                     const maxMarks = grading ? grading.maxMarks : matchedQ?.maxMarks || 5;
 
-                    const isFull = matchedQ && grading && score === maxMarks && maxMarks > 0;
-                    const isPartial = matchedQ && grading && score > 0 && score < maxMarks;
-                    const isZero = matchedQ && grading && score === 0;
+                    const isFailed = grading?.gradingStatus === "failed";
+                    const isFull = matchedQ && grading && score === maxMarks && maxMarks > 0 && !isFailed;
+                    const isPartial = matchedQ && grading && score > 0 && score < maxMarks && !isFailed;
+                    const isZero = matchedQ && grading && score === 0 && !isFailed;
 
                     let outcomeBorderColor = "border-slate-500";
                     let outcomeBgColor = "bg-slate-500/10";
@@ -715,7 +749,11 @@ export default function ReviewPage() {
 
                     if (matchedQ) {
                       questionLabelText = `Q${matchedQ.number}${matchedQ.subPart ? matchedQ.subPart : ""}`;
-                      if (isFull) {
+                      if (isFailed) {
+                        outcomeBorderColor = "border-slate-400";
+                        outcomeBgColor = "bg-slate-500/5";
+                        labelBgColor = "bg-slate-600";
+                      } else if (isFull) {
                         outcomeBorderColor = "border-emerald-600";
                         outcomeBgColor = "bg-emerald-500/10";
                         labelBgColor = "bg-emerald-600";
