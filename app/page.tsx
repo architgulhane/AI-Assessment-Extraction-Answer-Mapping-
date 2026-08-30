@@ -7,8 +7,18 @@ import Sidebar from "@/components/Sidebar";
 import Topbar from "@/components/Topbar";
 import { useVeda } from "@/lib/context";
 import { convertPdfToImages, extractPdfText } from "@/lib/pdfHelper";
-import { ArrowRight, AlertCircle, X } from "lucide-react";
+import { ArrowRight, AlertCircle, X, CheckCircle2, Loader2, Circle, Sparkles } from "lucide-react";
 import { useRouter } from "next/navigation";
+
+const PIPELINE_STEPS = [
+  { id: "read-qp", title: "Reading Question Paper", desc: "Converting PDF pages into images" },
+  { id: "read-as", title: "Reading Answer Sheet", desc: "Rasterizing student answer sheet pages" },
+  { id: "extract-q", title: "Extracting Questions", desc: "Parsing question text & structure with Gemini" },
+  { id: "extract-a", title: "Transcribing Answer Blocks", desc: "Detecting handwriting blocks & bounding boxes" },
+  { id: "map", title: "Mapping Answers to Questions", desc: "Running 2-pass explicit & semantic matching" },
+  { id: "grade", title: "AI Grading & Feedback", desc: "Evaluating answers & writing feedback" },
+  { id: "finalize", title: "Finalizing Workspace", desc: "Preparing review screen dashboard" },
+];
 
 export default function UploadPage() {
   const router = useRouter();
@@ -21,7 +31,6 @@ export default function UploadPage() {
     setAnswerSheetImages,
     isProcessing,
     setIsProcessing,
-    processingStep,
     setProcessingStep,
     setQuestions,
     setAnswerBlocks,
@@ -36,8 +45,10 @@ export default function UploadPage() {
   const [asMeta, setAsMeta] = useState<string>("");
   
   const [error, setError] = useState<string | null>(null);
-  
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+
+  const [currentStepIdx, setCurrentStepIdx] = useState<number>(0);
+  const [completedStepIds, setCompletedStepIds] = useState<string[]>([]);
 
   const convertImageToBase64 = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
@@ -101,8 +112,12 @@ export default function UploadPage() {
     setIsProcessing(true);
     setIsSidebarCollapsed(true);
     setError(null);
+    setCompletedStepIds([]);
+    setCurrentStepIdx(0);
 
     try {
+      // Step 0: Read QP
+      setCurrentStepIdx(0);
       setProcessingStep("Reading Question Paper...");
       let qpImages: string[] = [];
       let pdfText = "";
@@ -115,7 +130,10 @@ export default function UploadPage() {
         qpImages = [b64];
       }
       setQuestionPaperImages(qpImages);
+      setCompletedStepIds((prev) => [...prev, "read-qp"]);
 
+      // Step 1: Read AS
+      setCurrentStepIdx(1);
       setProcessingStep("Reading Answer Sheet...");
       let asImages: string[] = [];
       if (asFile.type === "application/pdf") {
@@ -125,7 +143,10 @@ export default function UploadPage() {
         asImages = [b64];
       }
       setAnswerSheetImages(asImages);
+      setCompletedStepIds((prev) => [...prev, "read-as"]);
 
+      // Step 2: Extract Questions
+      setCurrentStepIdx(2);
       setProcessingStep("Extracting Questions...");
       const qpResponse = await fetch("/api/extract-questions", {
         method: "POST",
@@ -135,7 +156,10 @@ export default function UploadPage() {
       if (!qpResponse.ok) throw new Error("Failed to extract questions from paper");
       const qpData = await qpResponse.json();
       setQuestions(qpData.questions);
+      setCompletedStepIds((prev) => [...prev, "extract-q"]);
 
+      // Step 3: Transcribe Answer Blocks
+      setCurrentStepIdx(3);
       setProcessingStep("Transcribing Answer Sheet with Bounding Boxes...");
       const asResponse = await fetch("/api/extract-answers", {
         method: "POST",
@@ -145,7 +169,10 @@ export default function UploadPage() {
       if (!asResponse.ok) throw new Error("Failed to extract handwritten answers");
       const asData = await asResponse.json();
       setAnswerBlocks(asData.answerBlocks);
+      setCompletedStepIds((prev) => [...prev, "extract-a"]);
 
+      // Step 4: Map
+      setCurrentStepIdx(4);
       setProcessingStep("Mapping Answer Blocks to Questions...");
       const mapResponse = await fetch("/api/map", {
         method: "POST",
@@ -158,7 +185,10 @@ export default function UploadPage() {
       if (!mapResponse.ok) throw new Error("Failed to map answers to questions");
       const mapData = await mapResponse.json();
       setMappedResults(mapData.mappedResults);
+      setCompletedStepIds((prev) => [...prev, "map"]);
 
+      // Step 5: Grade
+      setCurrentStepIdx(5);
       setProcessingStep("Grading answers and generating AI feedback...");
       const gradeResponse = await fetch("/api/grade", {
         method: "POST",
@@ -172,8 +202,13 @@ export default function UploadPage() {
       if (!gradeResponse.ok) throw new Error("Failed to grade answers");
       const gradeData = await gradeResponse.json();
       setGradedResults(gradeData.gradedResults);
+      setCompletedStepIds((prev) => [...prev, "grade"]);
 
+      // Step 6: Finalize
+      setCurrentStepIdx(6);
       setProcessingStep("Finalizing results...");
+      setCompletedStepIds((prev) => [...prev, "finalize"]);
+
       router.push("/review");
     } catch (err) {
       console.error(err);
@@ -208,31 +243,102 @@ export default function UploadPage() {
         <main className="flex-1 overflow-y-auto flex items-center justify-center p-8 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-slate-200/50 via-slate-100 to-slate-50/50 relative shadow-inner">
           <div className="w-full max-w-4xl relative z-10 my-auto">
             {isProcessing ? (
-              /* FIGMA REPLICATED PROCESSING STATE */
-              <div className="flex flex-col items-center justify-center py-20 bg-white border border-slate-200/80 rounded-3xl shadow-hero-card text-center">
+              /* PROCESSING STATE WITH LIVE CHECKPOINT LOGS */
+              <div className="flex flex-col items-center justify-center p-8 sm:p-10 bg-white border border-slate-200/80 rounded-3xl shadow-hero-card text-center w-full max-w-xl mx-auto animate-fade-in">
                 {/* Large Orange Sparkle loading animation */}
-                <div className="relative w-24 h-24 mb-6 flex items-center justify-center">
-                  <div className="absolute w-12 h-12 text-orange-500 animate-pulse">
-                    <svg viewBox="0 0 24 24" fill="currentColor" className="w-full h-full">
-                      <path d="M12 2l2.4 4.8 5.6.8-4 4 1 5.4-5-2.6-5 2.6 1-5.4-4-4 5.6-.8z" />
-                    </svg>
-                  </div>
-                  <div className="absolute w-8 h-8 text-orange-400 translate-x-6 -translate-y-4 animate-bounce">
-                    <svg viewBox="0 0 24 24" fill="currentColor" className="w-full h-full">
-                      <path d="M12 2l2.4 4.8 5.6.8-4 4 1 5.4-5-2.6-5 2.6 1-5.4-4-4 5.6-.8z" />
-                    </svg>
-                  </div>
-                  <div className="absolute w-6 h-6 text-orange-300 -translate-x-6 translate-y-4 animate-ping">
-                    <svg viewBox="0 0 24 24" fill="currentColor" className="w-full h-full">
-                      <path d="M12 2l2.4 4.8 5.6.8-4 4 1 5.4-5-2.6-5 2.6 1-5.4-4-4 5.6-.8z" />
-                    </svg>
+                <div className="relative w-16 h-16 mb-4 flex items-center justify-center">
+                  <div className="absolute inset-0 rounded-full bg-orange-100/60 animate-ping" />
+                  <div className="relative w-12 h-12 rounded-full bg-gradient-to-tr from-orange-500 to-amber-400 flex items-center justify-center text-white shadow-md">
+                    <Sparkles className="w-6 h-6 animate-pulse" />
                   </div>
                 </div>
                 
-                <h3 className="text-2xl font-black text-slate-800 tracking-tight">Extracting...</h3>
-                <p className="text-sm text-slate-500 font-semibold mt-1">This may take a while</p>
-                <div className="text-xs text-indigo-600 font-bold uppercase tracking-widest mt-4 bg-indigo-50 px-3.5 py-1.5 rounded-full animate-pulse">
-                  {processingStep}
+                <h3 className="text-2xl font-black text-slate-800 tracking-tight">Extracting Assessment Data</h3>
+                <p className="text-xs text-slate-500 font-semibold mt-1 mb-5">
+                  Step {Math.min(currentStepIdx + 1, PIPELINE_STEPS.length)} of {PIPELINE_STEPS.length} Checkpoints
+                </p>
+
+                {/* Overall Progress Bar */}
+                <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden mb-6 border border-slate-200/60">
+                  <div
+                    className="bg-gradient-to-r from-orange-500 to-amber-500 h-full transition-all duration-500 ease-out rounded-full"
+                    style={{
+                      width: `${Math.round((completedStepIds.length / PIPELINE_STEPS.length) * 100)}%`,
+                    }}
+                  />
+                </div>
+
+                {/* Checkpoint Logs Container */}
+                <div className="w-full bg-slate-50/80 border border-slate-200/70 rounded-2xl p-3.5 text-left space-y-2.5 max-h-[340px] overflow-y-auto">
+                  {PIPELINE_STEPS.map((step, idx) => {
+                    const isCompleted = completedStepIds.includes(step.id);
+                    const isCurrent = currentStepIdx === idx && !isCompleted;
+
+                    return (
+                      <div
+                        key={step.id}
+                        className={`flex items-center justify-between p-3 rounded-xl transition-all duration-200 ${
+                          isCurrent
+                            ? "bg-white border-2 border-orange-500/80 shadow-xs ring-2 ring-orange-500/10"
+                            : isCompleted
+                            ? "bg-white/90 border border-emerald-200/70"
+                            : "bg-slate-100/40 border border-transparent opacity-60"
+                        }`}
+                      >
+                        <div className="flex items-center gap-3 min-w-0 pr-2">
+                          {/* Status Icon */}
+                          {isCompleted ? (
+                            <div className="w-6 h-6 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center shrink-0">
+                              <CheckCircle2 className="w-4 h-4" />
+                            </div>
+                          ) : isCurrent ? (
+                            <div className="w-6 h-6 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center shrink-0">
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                            </div>
+                          ) : (
+                            <div className="w-6 h-6 rounded-full bg-slate-200/80 text-slate-400 flex items-center justify-center shrink-0">
+                              <Circle className="w-3.5 h-3.5" />
+                            </div>
+                          )}
+
+                          {/* Step Info */}
+                          <div className="min-w-0">
+                            <p
+                              className={`text-xs font-bold truncate ${
+                                isCurrent
+                                  ? "text-orange-950"
+                                  : isCompleted
+                                  ? "text-slate-800"
+                                  : "text-slate-400"
+                              }`}
+                            >
+                              {step.title}
+                            </p>
+                            <p className="text-[10px] text-slate-400 font-medium truncate">
+                              {step.desc}
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Status Badge */}
+                        <div className="shrink-0">
+                          {isCompleted ? (
+                            <span className="px-2.5 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10px] font-bold">
+                              Done ✓
+                            </span>
+                          ) : isCurrent ? (
+                            <span className="px-2.5 py-0.5 rounded-full bg-orange-50 border border-orange-200 text-orange-700 text-[10px] font-bold animate-pulse">
+                              Processing...
+                            </span>
+                          ) : (
+                            <span className="px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-400 text-[10px] font-medium">
+                              Pending
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             ) : (
