@@ -57,14 +57,8 @@ if (!globalThis.__gemini_quota_cooldowns__) {
   globalThis.__gemini_quota_cooldowns__ = new Map<string, number>();
 }
 
-// Permanently blacklisted dead models that return 404s despite appearing in list-models responses
-const HARDCODED_DEAD_MODELS = new Set([
-  "gemini-2.5-flash-lite",
-  "gemini-2.5-flash",
-]);
-
-// Preferred candidate chain order specified by system requirements
-const PREFERRED_MODEL_ORDER = [
+// Fixed candidate models array — strictly limited to these 3 models only
+const CANDIDATE_MODELS = [
   "gemini-3.5-flash",
   "gemini-flash-latest",
   "gemini-3.1-flash-lite",
@@ -72,47 +66,15 @@ const PREFERRED_MODEL_ORDER = [
 
 const QUOTA_COOLDOWN_MS = 3 * 60 * 1000; // 3 minute cooldown for 429 quota errors
 
-// Static fallback list if REST/SDK discovery endpoint is unavailable
-const STATIC_FALLBACK_MODELS = [
-  "gemini-3.5-flash",
-  "gemini-flash-latest",
-  "gemini-3.1-flash-lite",
-  "gemini-2.0-flash",
-  "gemini-1.5-flash",
-];
-
-export function sortAndFilterCandidateModels(discovered: string[]): string[] {
+export function getCandidateModels(): string[] {
   const hardFailed = globalThis.__gemini_hard_failed_models__ || new Set();
-  const validDiscovered = discovered.filter(
-    (m) => !HARDCODED_DEAD_MODELS.has(m) && !hardFailed.has(m)
-  );
-
-  const ordered: string[] = [];
-
-  // 1. Add preferred models in exact specified order if not dead/hard-failed
-  for (const preferred of PREFERRED_MODEL_ORDER) {
-    if (!HARDCODED_DEAD_MODELS.has(preferred) && !hardFailed.has(preferred)) {
-      if (!ordered.includes(preferred)) {
-        ordered.push(preferred);
-      }
-    }
-  }
-
-  // 2. Add remaining valid discovered models
-  for (const model of validDiscovered) {
-    if (!ordered.includes(model)) {
-      ordered.push(model);
-    }
-  }
-
-  return ordered;
+  return CANDIDATE_MODELS.filter((m) => !hardFailed.has(m));
 }
 
 export function getAvailableModels(): Promise<string[]> {
-  // Guarantee discovery fetch happens AT MOST ONCE per server process lifetime
+  // Discovery fetch retained for logging/diagnostic purposes only
   if (!globalThis.__gemini_discovery_promise__) {
     globalThis.__gemini_discovery_promise__ = (async () => {
-
       try {
         const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
         if (res.ok) {
@@ -126,25 +88,21 @@ export function getAvailableModels(): Promise<string[]> {
 
             if (discovered.length > 0) {
               console.log("[Gemini API] Dynamically discovered available models list from API.");
-              return discovered;
             }
           }
         }
       } catch (err) {
-        console.warn("[Gemini API Warning] Live model discovery fetch failed, using static fallback models list.", err);
+        console.warn("[Gemini API Warning] Live model discovery fetch failed.", err);
       }
-
-      return STATIC_FALLBACK_MODELS;
+      return CANDIDATE_MODELS;
     })();
   }
 
-  return globalThis.__gemini_discovery_promise__.then((discovered) =>
-    sortAndFilterCandidateModels(discovered)
-  );
+  return Promise.resolve(getCandidateModels());
 }
 
 export async function getGeminiModel(generationConfig?: GenerationConfig): Promise<GenerativeModel> {
-  const models = await getAvailableModels();
+  const models = getCandidateModels();
   const modelName = process.env.GEMINI_MODEL_NAME || models[0] || "gemini-3.5-flash";
   return genAI.getGenerativeModel({
     model: modelName,
@@ -180,17 +138,16 @@ export async function generateContentWithRetry(
     } as unknown as GenerateContentResult;
   }
 
-  const candidateModels = await getAvailableModels();
+  const candidateModels = getCandidateModels();
   const now = Date.now();
   const hardFailed = globalThis.__gemini_hard_failed_models__ || new Set();
   const cooldowns = globalThis.__gemini_quota_cooldowns__ || new Map();
-  let lastError: unknown = null;
 
   for (let mIdx = 0; mIdx < candidateModels.length; mIdx++) {
     const modelName = candidateModels[mIdx];
 
     // Check permanently hard-failed models
-    if (HARDCODED_DEAD_MODELS.has(modelName) || hardFailed.has(modelName)) {
+    if (hardFailed.has(modelName)) {
       continue;
     }
 
@@ -209,7 +166,6 @@ export async function generateContentWithRetry(
     try {
       return await model.generateContent(contents);
     } catch (error: unknown) {
-      lastError = error;
       const err = error as { message?: string; status?: number };
       const errorMsg = err?.message || "";
       const status = err?.status;
@@ -255,9 +211,5 @@ export async function generateContentWithRetry(
     }
   }
 
-  throw new AllModelsExhaustedError(
-    `All candidate Gemini models (${candidateModels.join(", ")}) were exhausted or failed. ${
-      lastError instanceof Error ? lastError.message : ""
-    }`
-  );
+  throw new AllModelsExhaustedError("All Gemini models unavailable, please try again shortly");
 }
